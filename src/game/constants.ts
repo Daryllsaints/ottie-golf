@@ -97,22 +97,20 @@ export const SWING = {
 
   // Power accuracy zone: release the drag with the pull magnitude
   // inside this band for a clean 100%-power strike.
-  sweetSpotMin: 0.75,   // 75% of max pull
-  sweetSpotMax: 0.90,   // 90% of max pull
-  // Releasing PAST sweetSpotMax (over-pull) caps power at this
-  // fraction of max and adds a random direction jitter to simulate
-  // a flinched, mishit swing.
-  overpowerPenalty: 0.65,
-  overpowerJitterDeg: 8,
+  // Widened from 75-90% (15% band) → 70-92% (22% band) so the
+  // sweet spot is more forgiving without removing the skill check.
+  sweetSpotMin: 0.70,
+  sweetSpotMax: 0.92,
+  // Over-pull penalty also softened — was 0.65 / ±8°.
+  overpowerPenalty: 0.75,
+  overpowerJitterDeg: 5,
 
-  // Hold penalty: after the grace period, the aim begins oscillating
-  // in a sine wave. Amplitude grows with hold time. The actual aim
-  // applied at release is the current sine value times the amplitude,
-  // so a skilled player times the release to the zero crossing for
-  // a clean strike.
-  holdGraceMs: 800,
-  holdDriftRateDegPerSec: 12,
-  holdDriftMaxDeg: 18,
+  // Hold penalty grace period extended (was 800ms) and drift rate
+  // halved (was 12°/sec) so casual hesitation is less punishing.
+  // Hard ceiling on drift dropped too.
+  holdGraceMs: 1200,
+  holdDriftRateDegPerSec: 8,
+  holdDriftMaxDeg: 14,
   holdOscHz: 1.6,
 } as const
 
