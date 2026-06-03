@@ -26,6 +26,7 @@ export class GolfScene extends Scene
     private aimGfx!: Phaser.GameObjects.Graphics;
     private dragOrigin = { x: 0, y: 0 };
     private dragCurrent = { x: 0, y: 0 };
+    private dragStartMs = 0;
 
     constructor()
     {
@@ -68,6 +69,11 @@ export class GolfScene extends Scene
     {
         this.ballSprite.setPosition(this.ballBody.position.x, this.ballBody.position.y);
 
+        // Aim guide must redraw every frame while AIMING so the
+        // hold-penalty oscillation animates live (sine wave whose
+        // amplitude grows with hold time).
+        if (this.state === 'AIMING') this.drawAimGuide();
+
         if (this.state === 'IN_FLIGHT')
         {
             const v = (this.ballBody as unknown as { velocity: { x: number; y: number } }).velocity;
@@ -80,6 +86,30 @@ export class GolfScene extends Scene
                 EventBus.emit('distance-to-pin', this.computeDistanceToPin());
             }
         }
+    }
+
+    // ─── Difficulty helpers ────────────────────────────────────────
+
+    /** Returns the current oscillation offset in radians based on
+     *  how long the drag has been held. Zero during the grace period;
+     *  amplitude grows linearly afterward up to holdDriftMaxDeg. */
+    private currentHoldOscRad(): number
+    {
+        const heldMs = this.time.now - this.dragStartMs;
+        const overGraceSec = Math.max(0, heldMs - SWING.holdGraceMs) / 1000;
+        const ampDeg = Math.min(overGraceSec * SWING.holdDriftRateDegPerSec, SWING.holdDriftMaxDeg);
+        if (ampDeg <= 0) return 0;
+        const tSec = this.time.now / 1000;
+        const phase = Math.sin(tSec * SWING.holdOscHz * Math.PI * 2);
+        return phase * ampDeg * Math.PI / 180;
+    }
+
+    /** Classifies the current pull magnitude into a power zone. */
+    private powerZone(tNorm: number): 'under' | 'sweet' | 'over'
+    {
+        if (tNorm < SWING.sweetSpotMin) return 'under';
+        if (tNorm <= SWING.sweetSpotMax) return 'sweet';
+        return 'over';
     }
 
     // ─── Course rendering ──────────────────────────────────────────
@@ -234,6 +264,7 @@ export class GolfScene extends Scene
         this.state = 'AIMING';
         this.dragOrigin = { x: bx, y: by };
         this.dragCurrent = { x: p.x, y: p.y };
+        this.dragStartMs = this.time.now;
         this.drawAimGuide();
     }
 
@@ -261,20 +292,37 @@ export class GolfScene extends Scene
         }
 
         const clamped = Math.min(pullMag, SWING.maxDragPx);
-        const powerT = clamped / SWING.maxDragPx;
-        const dirX = -pullX / pullMag;
-        const dirY = -pullY / pullMag;
-        const speed = powerT * SWING.maxSpeed;
+        const tNorm = clamped / SWING.maxDragPx;
+        const baseAngle = Math.atan2(-pullY / pullMag, -pullX / pullMag);
 
+        // Hold penalty: snapshot oscillation phase at release.
+        let finalAngle = baseAngle + this.currentHoldOscRad();
+
+        // Power zone:
+        //   under: weak shot, linear power scale, no jitter
+        //   sweet: 100% clean strike
+        //   over:  capped 65% power + random direction jitter (mishit)
+        const zone = this.powerZone(tNorm);
+        let powerMul: number;
+        if (zone === 'sweet') {
+            powerMul = 1.0;
+        } else if (zone === 'under') {
+            powerMul = tNorm; // linear 0..0.75 maps to 0..0.75 of max speed
+        } else {
+            powerMul = SWING.overpowerPenalty;
+            const jitterRad = (Math.random() - 0.5) * 2 * SWING.overpowerJitterDeg * Math.PI / 180;
+            finalAngle += jitterRad;
+        }
+
+        const speed = powerMul * SWING.maxSpeed;
         this.matter.body.setVelocity(
             this.ballBody as unknown as MatterJS.BodyType,
-            { x: dirX * speed, y: dirY * speed },
+            { x: Math.cos(finalAngle) * speed, y: Math.sin(finalAngle) * speed },
         );
 
         this.state = 'IN_FLIGHT';
         this.strokes += 1;
         EventBus.emit('strokes-changed', this.strokes);
-        // Swing pose for the duration of flight.
         this.ottie.setTexture(TEXTURE_OTTIE_SWING);
     }
 
@@ -288,26 +336,56 @@ export class GolfScene extends Scene
 
         const clamped = Math.min(pullMag, SWING.maxDragPx);
         const tNorm = clamped / SWING.maxDragPx;
-        const dirX = -pullX / pullMag;
-        const dirY = -pullY / pullMag;
-        const endX = this.dragOrigin.x + dirX * clamped;
-        const endY = this.dragOrigin.y + dirY * clamped;
+        const baseAngle = Math.atan2(-pullY / pullMag, -pullX / pullMag);
 
-        const color = tNorm < 0.85 ? COLORS.aimGuide : COLORS.aimGuideStrong;
-        this.aimGfx.lineStyle(3, color, 0.9);
+        // Hold-penalty oscillation: aim wobbles around the base
+        // direction in a sine wave whose amplitude grows after the
+        // grace period. Player sees this live as the line wobbles.
+        const oscAngle = baseAngle + this.currentHoldOscRad();
+        const endX = this.dragOrigin.x + Math.cos(oscAngle) * clamped;
+        const endY = this.dragOrigin.y + Math.sin(oscAngle) * clamped;
+
+        // Color by power zone.
+        const zone = this.powerZone(tNorm);
+        const color =
+            zone === 'sweet' ? COLORS.aimGuideSweet :
+            zone === 'over'  ? COLORS.aimGuideOver  :
+                               COLORS.aimGuideUnder;
+
+        this.aimGfx.lineStyle(3, color, 0.95);
         this.aimGfx.beginPath();
         this.aimGfx.moveTo(this.dragOrigin.x, this.dragOrigin.y);
         this.aimGfx.lineTo(endX, endY);
         this.aimGfx.strokePath();
 
+        // Power dots along the oscillated aim.
         const dotCount = 6;
         for (let i = 1; i <= dotCount; i++)
         {
             const t = i / (dotCount + 1);
-            const dx = this.dragOrigin.x + dirX * clamped * t;
-            const dy = this.dragOrigin.y + dirY * clamped * t;
+            const dx = this.dragOrigin.x + Math.cos(oscAngle) * clamped * t;
+            const dy = this.dragOrigin.y + Math.sin(oscAngle) * clamped * t;
             this.aimGfx.fillStyle(color, 0.7);
             this.aimGfx.fillCircle(dx, dy, 2);
+        }
+
+        // Sweet-spot tick marks along the BASE direction (un-oscillated)
+        // at the sweetSpotMin / sweetSpotMax pull magnitudes. Acts as
+        // the visible target band — release within these ticks for a
+        // clean strike. Drawn always so the player can plan even
+        // before they reach the band.
+        const perpX = -Math.sin(baseAngle);
+        const perpY =  Math.cos(baseAngle);
+        const tickLen = 8;
+        this.aimGfx.lineStyle(2, COLORS.aimGuideSweet, 0.85);
+        for (const tFrac of [SWING.sweetSpotMin, SWING.sweetSpotMax])
+        {
+            const tx = this.dragOrigin.x + Math.cos(baseAngle) * tFrac * SWING.maxDragPx;
+            const ty = this.dragOrigin.y + Math.sin(baseAngle) * tFrac * SWING.maxDragPx;
+            this.aimGfx.beginPath();
+            this.aimGfx.moveTo(tx - perpX * tickLen, ty - perpY * tickLen);
+            this.aimGfx.lineTo(tx + perpX * tickLen, ty + perpY * tickLen);
+            this.aimGfx.strokePath();
         }
     }
 }

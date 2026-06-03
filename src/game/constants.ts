@@ -14,6 +14,9 @@ export const COLORS = {
   treeShadow:     0x2A4E2D,
   aimGuide:       0xFFF8E7,
   aimGuideStrong: 0xFFD56E,
+  aimGuideUnder:  0xF5E0A8,   // muted cream — under-powered, weak shot
+  aimGuideSweet:  0x73C47B,   // green — clean strike zone
+  aimGuideOver:   0xC8543A,   // red — over-pull mishit zone
 } as const
 
 export const COURSE = {
@@ -91,6 +94,26 @@ export const SWING = {
   minDragPx: 12,
   maxSpeed: 14,
   restSpeedThreshold: 0.12,
+
+  // Power accuracy zone: release the drag with the pull magnitude
+  // inside this band for a clean 100%-power strike.
+  sweetSpotMin: 0.75,   // 75% of max pull
+  sweetSpotMax: 0.90,   // 90% of max pull
+  // Releasing PAST sweetSpotMax (over-pull) caps power at this
+  // fraction of max and adds a random direction jitter to simulate
+  // a flinched, mishit swing.
+  overpowerPenalty: 0.65,
+  overpowerJitterDeg: 8,
+
+  // Hold penalty: after the grace period, the aim begins oscillating
+  // in a sine wave. Amplitude grows with hold time. The actual aim
+  // applied at release is the current sine value times the amplitude,
+  // so a skilled player times the release to the zero crossing for
+  // a clean strike.
+  holdGraceMs: 800,
+  holdDriftRateDegPerSec: 12,
+  holdDriftMaxDeg: 18,
+  holdOscHz: 1.6,
 } as const
 
 export const BALL_PHYSICS = {
