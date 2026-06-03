@@ -33,6 +33,7 @@ export const COURSE = {
 // origin (0,0 = top-left of the course rectangle). Polygons describe
 // the fairway path and the rough that frames it. The putting green
 // is a flat ellipse around the hole.
+export const HOLE_1_PAR = 3;
 export const HOLE_1 = {
   // Fairway shape: dogleg from tee (lower-left) → curve → green (upper-right).
   // Closed polygon, drawn filled with COLORS.fairway. Outer rough is

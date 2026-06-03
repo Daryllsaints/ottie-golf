@@ -1,5 +1,5 @@
-import { Scene } from 'phaser';
-import { COLORS, COURSE, SWING, BALL_PHYSICS, HOLE_1 } from '../constants';
+import { Scene, Geom } from 'phaser';
+import { COLORS, COURSE, SWING, BALL_PHYSICS, HOLE_1, HOLE_1_PAR } from '../constants';
 import { EventBus } from '../EventBus';
 
 // Day 3: hand-crafted course diorama. Drag-back gesture from Day 2
@@ -27,6 +27,11 @@ export class GolfScene extends Scene
     private dragOrigin = { x: 0, y: 0 };
     private dragCurrent = { x: 0, y: 0 };
     private dragStartMs = 0;
+    private holeSunk = false;
+    private oobIndicator?: Phaser.GameObjects.Text;
+    private oobIndicatorHideAt = 0;
+    private sinkOverlay?: Phaser.GameObjects.Container;
+    private roughPolygon!: Geom.Polygon;
 
     constructor()
     {
@@ -53,6 +58,10 @@ export class GolfScene extends Scene
         this.placeOttie();
         this.placeBall();
 
+        // Build the rough polygon in screen-space coords for OOB hit tests.
+        const roughPts = this.translatePath(HOLE_1.roughPath).flatMap(p => [p.x, p.y]);
+        this.roughPolygon = new Geom.Polygon(roughPts);
+
         this.aimGfx = this.add.graphics().setDepth(50);
 
         this.input.on('pointerdown', (p: Phaser.Input.Pointer) => this.onPointerDown(p));
@@ -74,8 +83,38 @@ export class GolfScene extends Scene
         // amplitude grows with hold time).
         if (this.state === 'AIMING') this.drawAimGuide();
 
-        if (this.state === 'IN_FLIGHT')
+        // Fade the OOB indicator after its display window.
+        if (this.oobIndicator && this.time.now > this.oobIndicatorHideAt)
         {
+            this.oobIndicator.destroy();
+            this.oobIndicator = undefined;
+        }
+
+        if (this.state === 'IN_FLIGHT' && !this.holeSunk)
+        {
+            // Sink detection — ball center within HOLE area of cup.
+            const holeX = this.courseOffsetX + COURSE.holePosition.x;
+            const holeY = this.courseOffsetY + COURSE.holePosition.y;
+            const distToHole = Math.hypot(
+                this.ballBody.position.x - holeX,
+                this.ballBody.position.y - holeY,
+            );
+            if (distToHole < COURSE.holeRadius)
+            {
+                this.sinkBall();
+                return;
+            }
+
+            // OOB detection — ball center outside the rough polygon.
+            const inBounds = this.roughPolygon.contains(
+                this.ballBody.position.x, this.ballBody.position.y,
+            );
+            if (!inBounds)
+            {
+                this.handleOutOfBounds();
+                return;
+            }
+
             const v = (this.ballBody as unknown as { velocity: { x: number; y: number } }).velocity;
             const speed = Math.hypot(v.x, v.y);
             if (speed < SWING.restSpeedThreshold)
@@ -86,6 +125,107 @@ export class GolfScene extends Scene
                 EventBus.emit('distance-to-pin', this.computeDistanceToPin());
             }
         }
+    }
+
+    // ─── Hole completion + OOB ────────────────────────────────────
+
+    private sinkBall()
+    {
+        this.holeSunk = true;
+        this.matter.body.setVelocity(this.ballBody as unknown as MatterJS.BodyType, { x: 0, y: 0 });
+        const holeX = this.courseOffsetX + COURSE.holePosition.x;
+        const holeY = this.courseOffsetY + COURSE.holePosition.y;
+        this.matter.body.setPosition(this.ballBody as unknown as MatterJS.BodyType, { x: holeX, y: holeY }, false);
+        this.ballSprite.setVisible(false);
+        this.ottie.setTexture(TEXTURE_OTTIE_READY);
+
+        const diff = this.strokes - HOLE_1_PAR;
+        const verdict =
+            diff <= -2 ? 'eagle!' :
+            diff === -1 ? 'birdie' :
+            diff === 0  ? 'par'    :
+            diff === 1  ? 'bogey'  :
+                          `+${diff}`;
+
+        this.showSinkOverlay(verdict);
+    }
+
+    private showSinkOverlay(verdict: string)
+    {
+        const w = this.scale.width;
+        const h = this.scale.height;
+        const container = this.add.container(0, 0).setDepth(1000);
+
+        const backdrop = this.add.rectangle(0, 0, w, h, 0x1A1A1A, 0.55).setOrigin(0, 0);
+        container.add(backdrop);
+
+        const cardW = 280;
+        const cardH = 160;
+        const card = this.add.rectangle(w / 2, h / 2, cardW, cardH, 0xFFF8E7, 1)
+            .setStrokeStyle(2, 0xE8922A, 0.9);
+        container.add(card);
+
+        const title = this.add.text(w / 2, h / 2 - 40, 'sunk!', {
+            fontFamily: 'system-ui, sans-serif', fontSize: '28px',
+            color: '#E8922A', fontStyle: 'bold',
+        }).setOrigin(0.5);
+        container.add(title);
+
+        const detail = this.add.text(w / 2, h / 2, `${this.strokes} strokes · ${verdict}`, {
+            fontFamily: 'system-ui, sans-serif', fontSize: '16px',
+            color: '#3A2814',
+        }).setOrigin(0.5);
+        container.add(detail);
+
+        const hint = this.add.text(w / 2, h / 2 + 40, 'tap to replay', {
+            fontFamily: 'system-ui, sans-serif', fontSize: '13px',
+            color: '#857060', fontStyle: 'italic',
+        }).setOrigin(0.5);
+        container.add(hint);
+
+        this.sinkOverlay = container;
+    }
+
+    private handleOutOfBounds()
+    {
+        const teeX = this.courseOffsetX + COURSE.teePosition.x;
+        const teeY = this.courseOffsetY + COURSE.teePosition.y;
+        this.matter.body.setVelocity(this.ballBody as unknown as MatterJS.BodyType, { x: 0, y: 0 });
+        this.matter.body.setPosition(this.ballBody as unknown as MatterJS.BodyType, { x: teeX, y: teeY }, false);
+
+        this.strokes += 1; // OOB penalty stroke (lost ball)
+        this.state = 'IDLE';
+        this.ottie.setTexture(TEXTURE_OTTIE_READY);
+        EventBus.emit('strokes-changed', this.strokes);
+        EventBus.emit('distance-to-pin', this.computeDistanceToPin());
+
+        // Visible feedback for ~1.6s.
+        this.oobIndicator?.destroy();
+        this.oobIndicator = this.add.text(
+            this.scale.width / 2, this.scale.height * 0.35,
+            'out of bounds · +1', {
+                fontFamily: 'system-ui, sans-serif', fontSize: '18px',
+                color: '#FFF8E7', backgroundColor: '#C8543A',
+                padding: { x: 12, y: 6 },
+            },
+        ).setOrigin(0.5).setDepth(900);
+        this.oobIndicatorHideAt = this.time.now + 1600;
+    }
+
+    private resetHole()
+    {
+        const teeX = this.courseOffsetX + COURSE.teePosition.x;
+        const teeY = this.courseOffsetY + COURSE.teePosition.y;
+        this.matter.body.setVelocity(this.ballBody as unknown as MatterJS.BodyType, { x: 0, y: 0 });
+        this.matter.body.setPosition(this.ballBody as unknown as MatterJS.BodyType, { x: teeX, y: teeY }, false);
+        this.ballSprite.setVisible(true);
+        this.strokes = 0;
+        this.holeSunk = false;
+        this.state = 'IDLE';
+        this.sinkOverlay?.destroy();
+        this.sinkOverlay = undefined;
+        EventBus.emit('strokes-changed', this.strokes);
+        EventBus.emit('distance-to-pin', this.computeDistanceToPin());
     }
 
     // ─── Difficulty helpers ────────────────────────────────────────
@@ -256,6 +396,12 @@ export class GolfScene extends Scene
 
     private onPointerDown(p: Phaser.Input.Pointer)
     {
+        // Tap-to-replay when the sink overlay is showing.
+        if (this.holeSunk)
+        {
+            this.resetHole();
+            return;
+        }
         if (this.state !== 'IDLE') return;
         const bx = this.ballBody.position.x;
         const by = this.ballBody.position.y;
