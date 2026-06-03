@@ -22,7 +22,7 @@ export const COLORS = {
 export const COURSE = {
   width: 800,
   height: 600,
-  teePosition:  { x: 150, y: 420 },  // tee bottom-left for the dogleg shape
+  teePosition:  { x: 150, y: 520 },  // tee bottom-left, inside the fairway
   holePosition: { x: 660, y: 180 },  // hole upper-right
   ballRadius: 10,                     // slightly bigger so it reads on phone
   holeRadius: 14,

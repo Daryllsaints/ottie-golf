@@ -1,4 +1,4 @@
-import { Scene, Geom } from 'phaser';
+import { Scene } from 'phaser';
 import { COLORS, COURSE, SWING, BALL_PHYSICS, HOLE_1, HOLE_1_PAR } from '../constants';
 import { EventBus } from '../EventBus';
 
@@ -31,7 +31,6 @@ export class GolfScene extends Scene
     private oobIndicator?: Phaser.GameObjects.Text;
     private oobIndicatorHideAt = 0;
     private sinkOverlay?: Phaser.GameObjects.Container;
-    private roughPolygon!: Geom.Polygon;
 
     constructor()
     {
@@ -58,9 +57,6 @@ export class GolfScene extends Scene
         this.placeOttie();
         this.placeBall();
 
-        // Build the rough polygon in screen-space coords for OOB hit tests.
-        const roughPts = this.translatePath(HOLE_1.roughPath).flatMap(p => [p.x, p.y]);
-        this.roughPolygon = new Geom.Polygon(roughPts);
 
         this.aimGfx = this.add.graphics().setDepth(50);
 
@@ -105,10 +101,17 @@ export class GolfScene extends Scene
                 return;
             }
 
-            // OOB detection — ball center outside the rough polygon.
-            const inBounds = this.roughPolygon.contains(
-                this.ballBody.position.x, this.ballBody.position.y,
-            );
+            // OOB detection — ball center outside the course rectangle
+            // (the visible playfield). Using the rect, not the rough
+            // polygon, so the playable bounds are forgiving: anywhere
+            // on the brown frame is still in play.
+            const ballX = this.ballBody.position.x;
+            const ballY = this.ballBody.position.y;
+            const inBounds =
+                ballX >= this.courseOffsetX &&
+                ballX <= this.courseOffsetX + COURSE.width &&
+                ballY >= this.courseOffsetY &&
+                ballY <= this.courseOffsetY + COURSE.height;
             if (!inBounds)
             {
                 this.handleOutOfBounds();
