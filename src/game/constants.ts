@@ -109,9 +109,10 @@ export const SWING = {
   hitRadiusPx: 48,
   maxDragPx: 200,
   minDragPx: 12,
-  // Bumped from 14 for the new 960×2560 world so a clean drive
-  // covers ~150 yds of fairway. A par-4 is now reachable in 3-4 shots.
-  maxSpeed: 26,
+  // Tuned for Sawgrass #17 par-3 (~185 yds tee-to-pin) so a clean
+  // full strike just reaches the green. Mishit pulls land short or
+  // wide in the water — same all-or-nothing feel as the real hole.
+  maxSpeed: 28,
   restSpeedThreshold: 0.18,
 
   // Power accuracy zone: release the drag with the pull magnitude

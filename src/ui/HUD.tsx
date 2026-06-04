@@ -4,6 +4,7 @@
 // All pointer-events: none so the canvas swing input passes through.
 
 import { WIND } from '../game/constants';
+import { ACTIVE_HOLE } from '../game/terrain';
 
 type Props = {
     holeName?: string;
@@ -57,6 +58,14 @@ const styles = {
         minWidth: 80,
     },
     parLine: { display: 'block' as const },
+    subLine: {
+        display: 'block' as const,
+        fontSize: 10,
+        fontWeight: 500,
+        opacity: 0.7,
+        marginTop: 4,
+        fontStyle: 'italic' as const,
+    },
     topRight: {
         position: 'fixed' as const,
         top: 16,
@@ -115,18 +124,16 @@ const styles = {
 };
 
 export function HUD({ strokes = 0, distance = 0 }: Props) {
-    const holeNum = 1;
     return (
         <>
             <div style={styles.topLeftStack}>
                 <div style={styles.cardBtn}>card</div>
                 <div style={styles.parCard}>
-                    <span style={styles.parLine}>par 4</span>
-                    <span style={styles.parLine}>shot {strokes + 1}</span>
-                    <span style={styles.parLine}>best -</span>
+                    <span style={styles.parLine}>{ACTIVE_HOLE.name}</span>
+                    <span style={styles.parLine}>par {ACTIVE_HOLE.par} · shot {strokes + 1}</span>
+                    <span style={styles.subLine}>after {ACTIVE_HOLE.inspiration}</span>
                 </div>
             </div>
-            <div style={styles.flagBadge}>{holeNum}</div>
             <div style={styles.topRight}>
                 <div style={styles.windLabel}>wind</div>
                 <div style={styles.windArrow}>↑</div>

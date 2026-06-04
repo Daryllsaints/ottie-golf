@@ -4,12 +4,12 @@
 // Camera follows the ball.
 
 import { Scene } from 'phaser';
-import { SWING, BALL_PHYSICS, HOLE_1_PAR, COLORS, COURSE } from '../constants';
+import { SWING, BALL_PHYSICS, COLORS, COURSE } from '../constants';
 import { EventBus } from '../EventBus';
 import {
     Terrain, TILE_PX, GRID_COLS, GRID_ROWS, WORLD_W, WORLD_H, PX_PER_YARD,
-    TEE_WORLD, HOLE_WORLD,
-    buildTerrainGrid, cornerPattern, allSame, anyIs, generateTreePositions,
+    TEE_WORLD, HOLE_WORLD, ACTIVE_HOLE,
+    buildTerrainGrid, cornerPattern, allSame, anyIs, generateTreePositions, isOverWater,
 } from '../terrain';
 
 type SwingState = 'IDLE' | 'AIMING' | 'IN_FLIGHT';
@@ -148,6 +148,13 @@ export class GolfScene extends Scene {
             const speed = Math.hypot(v.x, v.y);
             if (speed < SWING.restSpeedThreshold) {
                 this.matter.body.setVelocity(this.ballBody as unknown as MatterJS.BodyType, { x: 0, y: 0 });
+                // Water hazard check — if the ball came to rest in the
+                // ocean (i.e. the player missed the green island), apply
+                // a one-stroke penalty and respawn at the tee.
+                if (isOverWater(this.grid, bx, by)) {
+                    this.handleWaterHazard();
+                    return;
+                }
                 this.state = 'IDLE';
                 this.ottie.setTexture(TEX.ottie);
                 this.trail = [];
@@ -156,6 +163,29 @@ export class GolfScene extends Scene {
                 EventBus.emit('distance-to-pin', this.computeDistanceToPin());
             }
         }
+    }
+
+    private handleWaterHazard() {
+        this.matter.body.setPosition(this.ballBody as unknown as MatterJS.BodyType, { x: TEE_WORLD.x, y: TEE_WORLD.y }, false);
+        this.strokes += 1;
+        this.state = 'IDLE';
+        this.ottie.setTexture(TEX.ottie);
+        this.trail = [];
+        this.trailGfx.clear();
+        this.startOttieIdleBob();
+        EventBus.emit('strokes-changed', this.strokes);
+        EventBus.emit('distance-to-pin', this.computeDistanceToPin());
+
+        this.oobIndicator?.destroy();
+        this.oobIndicator = this.add.text(
+            this.scale.width / 2, 60,
+            'splash · +1', {
+                fontFamily: 'system-ui, sans-serif', fontSize: '16px',
+                color: '#FFF8E7', backgroundColor: '#3a87b8',
+                padding: { x: 12, y: 6 },
+            },
+        ).setOrigin(0.5).setScrollFactor(0).setDepth(900);
+        this.oobIndicatorHideAt = this.time.now + 1800;
     }
 
     // ─── Wang tile setup ──────────────────────────────────────────
@@ -493,7 +523,7 @@ export class GolfScene extends Scene {
         this.ottie.setTexture(TEX.ottie);
         this.startOttieIdleBob();
 
-        const diff = this.strokes - HOLE_1_PAR;
+        const diff = this.strokes - ACTIVE_HOLE.par;
         const verdict =
             diff <= -2 ? 'eagle!' :
             diff === -1 ? 'birdie' :
@@ -547,7 +577,7 @@ export class GolfScene extends Scene {
             fontFamily: 'system-ui, sans-serif', fontSize: '32px',
             color: verdictColor, fontStyle: 'bold',
         }).setOrigin(0.5).setScrollFactor(0));
-        container.add(this.add.text(w / 2, cardY + 110, `${this.strokes} stroke${this.strokes === 1 ? '' : 's'} · par ${HOLE_1_PAR}`, {
+        container.add(this.add.text(w / 2, cardY + 110, `${this.strokes} stroke${this.strokes === 1 ? '' : 's'} · par ${ACTIVE_HOLE.par}`, {
             fontFamily: 'system-ui, sans-serif', fontSize: '14px',
             color: '#3A2814',
         }).setOrigin(0.5).setScrollFactor(0));
