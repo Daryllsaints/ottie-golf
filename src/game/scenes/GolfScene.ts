@@ -108,21 +108,17 @@ export class GolfScene extends Scene {
         this.placeOttie();
         this.placeBall();
 
-        // Camera: zoom-to-fit when at rest so the player sees the whole
-        // hole, then smoothly zoom-in and follow the ball when in flight.
-        const padX = 20;
-        const padY = 80;
-        const zX = (this.scale.width  - padX * 2) / WORLD_W;
-        const zY = (this.scale.height - padY * 2) / WORLD_H;
-        this.overviewZoom = Math.min(zX, zY);
-        if (this.overviewZoom > 1.0) this.overviewZoom = 1.0;
+        // Camera: cover-zoom so the world fills the frame (no brown
+        // letterbox). The world is portrait-aspect; phones are even
+        // more elongated, so fitting by width crops a bit of ocean
+        // off the top/bottom — fine, the green and tee both stay in
+        // view because they sit in the middle of the world.
+        this.overviewZoom = this.computeOverviewZoom();
         this.applyOverviewCamera();
 
         // Re-fit on viewport resize.
         this.scale.on('resize', () => {
-            const nzX = (this.scale.width  - padX * 2) / WORLD_W;
-            const nzY = (this.scale.height - padY * 2) / WORLD_H;
-            this.overviewZoom = Math.min(nzX, nzY, 1.0);
+            this.overviewZoom = this.computeOverviewZoom();
             if (this.state !== 'IN_FLIGHT') this.applyOverviewCamera();
         });
 
@@ -392,6 +388,17 @@ export class GolfScene extends Scene {
             this.aimHintGfx.lineTo(x2, y2);
             this.aimHintGfx.strokePath();
         }
+    }
+
+    /** Cover-fit zoom: scale so the world fills the viewport on its
+     *  smaller dimension. The larger dimension overflows and gets
+     *  cropped offscreen — acceptable here because the gameplay
+     *  (green + tee) sits in the world center. Capped at 2.0 so we
+     *  never blow up the art at silly scales. */
+    private computeOverviewZoom(): number {
+        const zX = this.scale.width  / WORLD_W;
+        const zY = this.scale.height / WORLD_H;
+        return Math.min(Math.max(zX, zY), 2.0);
     }
 
     /** Force the camera viewport to match the current canvas size, then
