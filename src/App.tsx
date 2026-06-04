@@ -122,6 +122,7 @@ function App() {
                 distance={distance}
                 holeNum={holeIdx + 1}
                 holeCount={HOLES.length}
+                runningTotals={route.kind === 'match' ? { me: myTotal, opp: opponentTotal } : undefined}
             />
             {showShareCard && match && (
                 <ShareCard

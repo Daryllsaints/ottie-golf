@@ -1,9 +1,8 @@
 // HUD chip cards inspired by Pixel Pro Golf's overlay style.
-// Top-left: orange 'card' button + dark hatched par/shot/best block.
-// Top-right: dark hatched wind card with arrow + speed.
+// Top-left: orange 'card' button + dark hatched par/shot/hole block.
+// Top-right (match only): running totals across holes.
 // All pointer-events: none so the canvas swing input passes through.
 
-import { WIND } from '../game/constants';
 import { ACTIVE_HOLE } from '../game/terrain';
 
 type Props = {
@@ -12,6 +11,7 @@ type Props = {
     distance?: number;
     holeNum?: number;
     holeCount?: number;
+    runningTotals?: { me: number; opp: number; opponentLabel?: string };
 };
 
 const HATCHED = 'repeating-linear-gradient(-45deg, #2d4a2d, #2d4a2d 5px, #1f3a1f 5px, #1f3a1f 10px)';
@@ -77,7 +77,7 @@ const styles = {
         textTransform: 'uppercase' as const,
         marginBottom: 2,
     },
-    topRight: {
+    totalsCard: {
         position: 'fixed' as const,
         top: 16,
         right: 16,
@@ -85,40 +85,25 @@ const styles = {
         ...cardCommon,
         background: HATCHED,
         textAlign: 'center' as const,
-        minWidth: 76,
+        minWidth: 84,
     },
-    windLabel: {
-        fontSize: 13,
+    totalsLabel: {
+        fontSize: 10,
         fontWeight: 700,
+        letterSpacing: 1.5,
+        color: '#E8922A',
+        textTransform: 'uppercase' as const,
         marginBottom: 4,
     },
-    windArrow: {
-        display: 'inline-block',
-        fontSize: 22,
-        lineHeight: 1,
-        transform: `rotate(${WIND.directionDeg}deg)`,
-        marginBottom: 4,
+    totalsRow: {
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        gap: 12,
     },
-    windSpeed: {
-        fontSize: 15,
-        fontWeight: 700,
-    },
-    flagBadge: {
-        position: 'fixed' as const,
-        top: 22,
-        left: 90,
-        zIndex: 11,
-        background: '#C8543A',
-        color: '#FFF8E7',
-        padding: '2px 8px',
-        fontFamily: 'system-ui, sans-serif',
-        fontSize: 14,
-        fontWeight: 700,
-        borderRadius: 4,
-        boxShadow: '0 1px 4px rgba(0,0,0,0.2)',
-        pointerEvents: 'none' as const,
-        userSelect: 'none' as const,
-    },
+    totalsCell: { display: 'flex', flexDirection: 'column' as const, alignItems: 'center' as const },
+    totalsName: { fontSize: 9, fontWeight: 600, opacity: 0.75, textTransform: 'uppercase' as const, letterSpacing: 1 },
+    totalsNum:  { fontSize: 20, fontWeight: 800, lineHeight: 1 },
     distance: {
         position: 'fixed' as const,
         top: 96,
@@ -134,8 +119,10 @@ const styles = {
     },
 };
 
-export function HUD({ strokes = 0, distance = 0, holeNum, holeCount }: Props) {
+export function HUD({ strokes = 0, distance = 0, holeNum, holeCount, runningTotals }: Props) {
     const showHoleCounter = typeof holeNum === 'number' && typeof holeCount === 'number';
+    const showTotals = !!runningTotals && (runningTotals.me > 0 || runningTotals.opp > 0);
+    const oppLabel = runningTotals?.opponentLabel ?? 'them';
     return (
         <>
             <div style={styles.topLeftStack}>
@@ -149,11 +136,21 @@ export function HUD({ strokes = 0, distance = 0, holeNum, holeCount }: Props) {
                     <span style={styles.subLine}>after {ACTIVE_HOLE.inspiration}</span>
                 </div>
             </div>
-            <div style={styles.topRight}>
-                <div style={styles.windLabel}>wind</div>
-                <div style={styles.windArrow}>↑</div>
-                <div style={styles.windSpeed}>{WIND.speedMph}</div>
-            </div>
+            {showTotals && (
+                <div style={styles.totalsCard}>
+                    <div style={styles.totalsLabel}>match</div>
+                    <div style={styles.totalsRow}>
+                        <div style={styles.totalsCell}>
+                            <div style={styles.totalsName}>you</div>
+                            <div style={styles.totalsNum}>{runningTotals!.me}</div>
+                        </div>
+                        <div style={styles.totalsCell}>
+                            <div style={styles.totalsName}>{oppLabel}</div>
+                            <div style={styles.totalsNum}>{runningTotals!.opp}</div>
+                        </div>
+                    </div>
+                </div>
+            )}
             <div style={styles.distance}>{distance} yds to pin</div>
         </>
     );

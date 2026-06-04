@@ -151,7 +151,11 @@ const road17: HoleSpec = (() => {
     };
 })();
 
-export const HOLES: HoleSpec[] = [sawgrass17, pebble7, road17];
+// Difficulty ramp for first-time players: open with the forgiving
+// dogleg-with-fairway-recovery (Road Hole), middle with the small
+// cliff green (Pebble), end with the dramatic island (Sawgrass) so
+// the final hole carries the most weight.
+export const HOLES: HoleSpec[] = [road17, pebble7, sawgrass17];
 
 // ─── Active hole (mutable, ESM live bindings) ─────────────────────
 //
