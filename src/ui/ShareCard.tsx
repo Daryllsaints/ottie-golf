@@ -19,6 +19,7 @@ type Props = {
     opponentTotal?: number;
     totalPar?: number;
     nextLabel?: string;
+    opponentName?: string | null;
 };
 
 const HECKLE_WINDOW_MS = 4000;
@@ -118,7 +119,10 @@ function verdict(strokes: number, par: number): string {
     return `+${d}`;
 }
 
-export function ShareCard({ matchId, me, myShots, opponentShots, par, onDismiss, onHeckleCommit, matchComplete = false, myTotal, opponentTotal, totalPar, nextLabel }: Props) {
+export function ShareCard({ matchId, me, myShots, opponentShots, par, onDismiss, onHeckleCommit, matchComplete = false, myTotal, opponentTotal, totalPar, nextLabel, opponentName }: Props) {
+    const opponentLabel = opponentName && opponentName.trim().length > 0
+        ? opponentName.toUpperCase()
+        : (me === 'A' ? 'PLAYER B' : 'PLAYER A');
     const [copied, setCopied] = useState(false);
     const myStrokes = myShots[myShots.length - 1]?.strokes ?? 0;
     const oppStrokes = opponentShots[opponentShots.length - 1]?.strokes ?? null;
@@ -214,7 +218,7 @@ export function ShareCard({ matchId, me, myShots, opponentShots, par, onDismiss,
                         <div style={styles.scoreNum}>{matchComplete && showTotals ? myTotal : myStrokes}</div>
                     </div>
                     <div style={styles.scoreCell}>
-                        <div style={styles.scoreLabel}>{me === 'A' ? 'PLAYER B' : 'PLAYER A'}</div>
+                        <div style={styles.scoreLabel}>{opponentLabel}</div>
                         <div style={styles.scoreNum}>
                             {matchComplete && typeof opponentTotal === 'number'
                                 ? opponentTotal

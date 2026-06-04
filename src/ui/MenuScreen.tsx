@@ -3,7 +3,8 @@
 // navigates to /m/:code so the player can share the URL.
 
 import { useState } from 'react';
-import { createMatch, matchUrl } from '../lib/match';
+import { createMatch, displayName, matchUrl, setDisplayName } from '../lib/match';
+import { HOLES } from '../game/terrain';
 
 type Props = { onPlaySolo: () => void };
 
@@ -44,11 +45,35 @@ const styles = {
         position: 'absolute' as const, bottom: 24,
         fontSize: 11, opacity: 0.6, textAlign: 'center' as const,
     },
+    nameBlock: {
+        display: 'flex' as const, flexDirection: 'column' as const,
+        alignItems: 'center' as const, gap: 6,
+        marginBottom: 6, marginTop: -8,
+    },
+    nameLabel: {
+        fontSize: 10, fontWeight: 700, letterSpacing: 2,
+        opacity: 0.75, textTransform: 'uppercase' as const,
+    },
+    nameInput: {
+        background: 'rgba(0,0,0,0.25)', color: '#FFF8E7',
+        border: '1px solid rgba(255,248,231,0.3)', borderRadius: 8,
+        padding: '8px 14px', fontSize: 15, fontWeight: 600,
+        textAlign: 'center' as const,
+        fontFamily: 'system-ui, sans-serif',
+        width: 220, outline: 'none',
+    },
 };
 
 export function MenuScreen({ onPlaySolo }: Props) {
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [name, setName] = useState(() => displayName() ?? '');
+    const firstHole = HOLES[0];
+
+    function handleNameChange(value: string) {
+        setName(value);
+        setDisplayName(value);
+    }
 
     async function handleStartMatch() {
         if (busy) return;
@@ -59,14 +84,24 @@ export function MenuScreen({ onPlaySolo }: Props) {
             setBusy(false);
             return;
         }
-        // Navigate to the match URL — main.tsx routes to MatchScreen.
         window.location.href = matchUrl(match.id);
     }
 
     return (
         <div style={styles.backdrop}>
             <div style={styles.title}>OTTIE GOLF</div>
-            <div style={styles.subtitle}>The Island · TPC Sawgrass #17</div>
+            <div style={styles.subtitle}>{firstHole.name} · {firstHole.inspiration}</div>
+            <div style={styles.nameBlock}>
+                <div style={styles.nameLabel}>your name (optional)</div>
+                <input
+                    style={styles.nameInput}
+                    type="text"
+                    placeholder="e.g. dee"
+                    value={name}
+                    maxLength={24}
+                    onChange={(e) => handleNameChange(e.target.value)}
+                />
+            </div>
             <button style={styles.btnPrimary} onClick={handleStartMatch} disabled={busy}>
                 {busy ? 'starting...' : 'start match with a friend'}
             </button>

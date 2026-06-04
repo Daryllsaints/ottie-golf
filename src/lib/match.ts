@@ -5,12 +5,15 @@
 import { supabase } from './supabase';
 
 const SESSION_KEY = 'ottiegolf:sessionId';
+const NAME_KEY = 'ottiegolf:name';
 
 export type Match = {
     id: string;
     course_id: string;
     player_a_id: string | null;
     player_b_id: string | null;
+    player_a_name: string | null;
+    player_b_name: string | null;
     current_turn: 'A' | 'B';
     current_hole: number;
     status: 'open' | 'in_progress' | 'complete' | 'abandoned';
@@ -45,6 +48,24 @@ export function sessionId(): string {
     }
 }
 
+/** Per-browser optional display name. null if the user has not set one. */
+export function displayName(): string | null {
+    try {
+        const raw = window.localStorage.getItem(NAME_KEY);
+        if (!raw) return null;
+        const trimmed = raw.trim().slice(0, 24);
+        return trimmed.length > 0 ? trimmed : null;
+    } catch { return null; }
+}
+
+export function setDisplayName(name: string): void {
+    try {
+        const trimmed = name.trim().slice(0, 24);
+        if (trimmed.length === 0) window.localStorage.removeItem(NAME_KEY);
+        else window.localStorage.setItem(NAME_KEY, trimmed);
+    } catch { /* ignore */ }
+}
+
 /** Generate a short shareable code like 'a1b2c3' for match URLs. */
 export function generateMatchCode(): string {
     const chars = 'abcdefghijkmnpqrstuvwxyz23456789';
@@ -58,9 +79,14 @@ export async function createMatch(): Promise<Match | null> {
     if (!supabase) return null;
     const me = sessionId();
     const code = generateMatchCode();
+    const name = displayName();
     const { data, error } = await supabase
         .from('og_matches')
-        .insert({ id: code, player_a_id: me, current_turn: 'A', current_hole: 1, status: 'open' })
+        .insert({
+            id: code, player_a_id: me,
+            player_a_name: name,
+            current_turn: 'A', current_hole: 1, status: 'open',
+        })
         .select()
         .single();
     if (error) {
@@ -90,11 +116,12 @@ export async function joinOrLoadMatch(code: string): Promise<{ match: Match; me:
     if (match.player_a_id === me) return { match, me: 'A' };
     if (match.player_b_id === me) return { match, me: 'B' };
 
-    // Slot B open — claim it.
+    // Slot B open — claim it and stamp our name.
     if (!match.player_b_id) {
+        const myName = displayName();
         const { data: updated, error: updateErr } = await supabase
             .from('og_matches')
-            .update({ player_b_id: me, status: 'in_progress' })
+            .update({ player_b_id: me, player_b_name: myName, status: 'in_progress' })
             .eq('id', code)
             .select()
             .single();
