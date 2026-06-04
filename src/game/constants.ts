@@ -111,10 +111,11 @@ export const SWING = {
   hitRadiusPx: 80,
   maxDragPx: 200,
   minDragPx: 12,
-  // Tuned for Sawgrass #17 par-3 (~185 yds tee-to-pin) so a clean
-  // full strike just reaches the green. Mishit pulls land short or
-  // wide in the water — same all-or-nothing feel as the real hole.
-  maxSpeed: 28,
+  // Tuned for the tighter Sawgrass #17 layout (~125 yds tee-to-pin)
+  // — clean full strike just reaches the green. Mishit pulls land
+  // short or wide in the water, same all-or-nothing feel as the
+  // real hole.
+  maxSpeed: 18,
   restSpeedThreshold: 0.18,
 
   // Power accuracy zone: release the drag with the pull magnitude

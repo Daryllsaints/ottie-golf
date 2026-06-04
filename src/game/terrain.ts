@@ -23,12 +23,14 @@ export type HoleSpec = {
     terrainAt: (col: number, row: number) => Terrain;
 };
 
-// Sawgrass #17 — Island Green. Par 3, ~150 yds.
+// Sawgrass #17 — Island Green. Par 3, ~135 yds. World aspect tuned
+// for portrait phone screens (1:1.67 instead of 1:2) so the camera
+// can fit the whole hole without shrinking everything tiny.
 const sawgrass17: HoleSpec = (() => {
-    const COLS = 25;
-    const ROWS = 50;
-    const TEE  = { col: 12, row: ROWS - 5 };
-    const HOLE = { col: 12, row: 8 };
+    const COLS = 18;
+    const ROWS = 30;
+    const TEE  = { col: 9, row: ROWS - 5 };
+    const HOLE = { col: 9, row: 5 };
     return {
         name: 'The Island',
         inspiration: 'TPC Sawgrass #17',
@@ -36,28 +38,26 @@ const sawgrass17: HoleSpec = (() => {
         gridCols: COLS, gridRows: ROWS,
         teeVertex: TEE, holeVertex: HOLE,
         terrainAt(col: number, row: number): Terrain {
-            // Tee box: small rough island at the south. Slight pad +
-            // wraparound to give it shape.
+            // Tee box: small rough island at the south
             const teeDx = col - TEE.col;
             const teeDy = row - TEE.row;
-            const distTee = Math.hypot(teeDx / 1.2, teeDy / 0.9);
-            if (distTee < 3.5) return 'rough';
-            if (distTee < 4.3) return 'rough';
+            const distTee = Math.hypot(teeDx / 1.3, teeDy / 0.9);
+            if (distTee < 2.6) return 'rough';
 
-            // Green island: oval around the cup. Wider than tall, classic Sawgrass shape.
+            // Green island: oval around the cup, classic Sawgrass shape
             const greenDx = col - HOLE.col;
             const greenDy = row - HOLE.row;
-            const distGreen = Math.hypot(greenDx / 1.2, greenDy / 1.0);
-            if (distGreen < 3.0) return 'green';
+            const distGreen = Math.hypot(greenDx / 1.3, greenDy / 1.0);
+            if (distGreen < 2.6) return 'green';
 
-            // Rough fringe around the green (the island's "lip" before water).
-            if (distGreen < 4.0) return 'rough';
+            // Rough fringe around the green (the island's "lip" before water)
+            if (distGreen < 3.4) return 'rough';
 
-            // Sand bunker bites into the front-right of the green.
-            const sandDx = col - (HOLE.col + 2.4);
-            const sandDy = row - (HOLE.row + 2.4);
+            // Sand bunker bites into the front-right of the green
+            const sandDx = col - (HOLE.col + 2.0);
+            const sandDy = row - (HOLE.row + 1.8);
             const distSand = Math.hypot(sandDx / 1.0, sandDy / 0.7);
-            if (distSand < 1.6) return 'sand';
+            if (distSand < 1.3) return 'sand';
 
             return 'ocean';
         },

@@ -110,9 +110,10 @@ export class GolfScene extends Scene {
 
         // Camera: zoom-to-fit when at rest so the player sees the whole
         // hole, then smoothly zoom-in and follow the ball when in flight.
-        // Compute the zoom that fits both axes with some margin.
-        const padX = 60;
-        const padY = 200; // extra top padding so the par-card HUD doesn't cover the green
+        // Tight padding since the world aspect (1:1.67) now closely
+        // matches portrait phones — minimal letterboxing.
+        const padX = 20;
+        const padY = 80;
         const zX = (this.scale.width  - padX * 2) / WORLD_W;
         const zY = (this.scale.height - padY * 2) / WORLD_H;
         this.overviewZoom = Math.min(zX, zY);
