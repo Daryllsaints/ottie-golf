@@ -70,6 +70,9 @@ export class GolfScene extends Scene {
     private overviewZoom = 1.0;
     private cupHaloTween?: Phaser.Tweens.Tween;
     private cupHalo?: Phaser.GameObjects.Arc;
+    private panActive = false;
+    private panLastAvg = { x: 0, y: 0 };
+    private suppressSingleDrag = false;
 
     constructor() { super('GolfScene'); }
 
@@ -126,6 +129,7 @@ export class GolfScene extends Scene {
         this.aimGfx = this.add.graphics().setDepth(500);
         this.drawAimHint();
 
+        this.input.addPointer(1);
         this.input.on('pointerdown', (p: Phaser.Input.Pointer) => this.onPointerDown(p));
         this.input.on('pointermove', (p: Phaser.Input.Pointer) => this.onPointerMove(p));
         this.input.on('pointerup',   (p: Phaser.Input.Pointer) => this.onPointerUp(p));
@@ -523,14 +527,57 @@ export class GolfScene extends Scene {
 
     // ─── Input ────────────────────────────────────────────────────
 
+    private activePointerCount(): number {
+        let n = 0;
+        const ps = [this.input.pointer1, this.input.pointer2, this.input.pointer3];
+        for (const p of ps) if (p && p.isDown) n++;
+        return n;
+    }
+
+    private avgActivePointerScreen(): { x: number; y: number } {
+        const active: Phaser.Input.Pointer[] = [];
+        for (const p of [this.input.pointer1, this.input.pointer2, this.input.pointer3]) {
+            if (p && p.isDown) active.push(p);
+        }
+        if (active.length === 0) return { x: 0, y: 0 };
+        let sx = 0, sy = 0;
+        for (const p of active) { sx += p.x; sy += p.y; }
+        return { x: sx / active.length, y: sy / active.length };
+    }
+
+    /** Keep the camera's center inside the world rect so the user can't
+     *  pan into empty space and lose the course off-screen. */
+    private clampPan() {
+        const cam = this.cameras.main;
+        const halfW = this.scale.width  / cam.zoom / 2;
+        const halfH = this.scale.height / cam.zoom / 2;
+        cam.scrollX = Math.max(-halfW, Math.min(WORLD_W - halfW, cam.scrollX));
+        cam.scrollY = Math.max(-halfH, Math.min(WORLD_H - halfH, cam.scrollY));
+    }
+
     private onPointerDown(p: Phaser.Input.Pointer) {
         if (this.holeSunk) { this.resetHole(); return; }
+
+        // Two-finger pan: the moment a second pointer touches down,
+        // cancel any in-progress aim and start panning.
+        if (this.activePointerCount() >= 2) {
+            if (this.state === 'AIMING') {
+                this.state = 'IDLE';
+                this.aimGfx.clear();
+                this.drawAimHint();
+            }
+            this.panActive = true;
+            this.panLastAvg = this.avgActivePointerScreen();
+            this.suppressSingleDrag = true;
+            return;
+        }
+
         if (this.state !== 'IDLE') return;
+        if (this.suppressSingleDrag) return;
+
         // Pool-style drag: gesture origin is wherever the finger first
-        // touched, not the ball. This frees the player from having to
-        // pull the ball back from awkward edge-of-screen positions.
-        // The aim guide still renders from the ball; only the gesture
-        // measurement uses dragOrigin.
+        // touched, not the ball. The aim guide still renders from the
+        // ball; only the gesture measurement uses dragOrigin.
         this.state = 'AIMING';
         this.dragOrigin = { x: p.worldX, y: p.worldY };
         this.dragCurrent = { x: p.worldX, y: p.worldY };
@@ -540,12 +587,37 @@ export class GolfScene extends Scene {
     }
 
     private onPointerMove(p: Phaser.Input.Pointer) {
+        if (this.panActive) {
+            const avg = this.avgActivePointerScreen();
+            const dx = avg.x - this.panLastAvg.x;
+            const dy = avg.y - this.panLastAvg.y;
+            const cam = this.cameras.main;
+            cam.scrollX -= dx / cam.zoom;
+            cam.scrollY -= dy / cam.zoom;
+            this.clampPan();
+            this.panLastAvg = avg;
+            return;
+        }
         if (this.state !== 'AIMING') return;
         this.dragCurrent = { x: p.worldX, y: p.worldY };
         this.drawAimGuide();
     }
 
     private onPointerUp(_p: Phaser.Input.Pointer) {
+        const count = this.activePointerCount();
+
+        if (this.panActive) {
+            if (count < 2) this.panActive = false;
+            if (count === 0) this.suppressSingleDrag = false;
+            else this.panLastAvg = this.avgActivePointerScreen();
+            return;
+        }
+
+        if (this.suppressSingleDrag) {
+            if (count === 0) this.suppressSingleDrag = false;
+            return;
+        }
+
         if (this.state !== 'AIMING') return;
 
         const pullX = this.dragCurrent.x - this.dragOrigin.x;
