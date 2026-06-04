@@ -1,6 +1,7 @@
-// Day 3 HUD: hole name + stroke counter + wind indicator + distance.
-// pointer-events: none on the whole stack so the canvas stays
-// interactive underneath.
+// HUD chip cards inspired by Pixel Pro Golf's overlay style.
+// Top-left: orange 'card' button + dark hatched par/shot/best block.
+// Top-right: dark hatched wind card with arrow + speed.
+// All pointer-events: none so the canvas swing input passes through.
 
 import { WIND } from '../game/constants';
 
@@ -10,83 +11,128 @@ type Props = {
     distance?: number;
 };
 
-const cardBase = {
-    background: '#FFF8E7',
-    color: '#E8922A',
+const HATCHED = 'repeating-linear-gradient(-45deg, #2d4a2d, #2d4a2d 5px, #1f3a1f 5px, #1f3a1f 10px)';
+
+const cardCommon = {
+    color: '#FFF8E7',
     borderRadius: 8,
-    boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
-    fontFamily: 'system-ui, -apple-system, "Segoe UI", sans-serif',
+    padding: '10px 14px',
     pointerEvents: 'none' as const,
     userSelect: 'none' as const,
+    fontFamily: 'system-ui, -apple-system, sans-serif',
+    fontSize: 13,
+    fontWeight: 600,
+    lineHeight: 1.35,
+    boxShadow: '0 2px 6px rgba(0,0,0,0.18)',
 };
 
 const styles = {
-    topLeft: {
+    topLeftStack: {
         position: 'fixed' as const,
         top: 16,
         left: 16,
-        padding: '12px 16px',
+        display: 'flex',
+        flexDirection: 'column' as const,
+        gap: 8,
         zIndex: 10,
-        ...cardBase,
+        pointerEvents: 'none' as const,
     },
+    cardBtn: {
+        background: '#E8922A',
+        color: '#FFF8E7',
+        fontWeight: 700,
+        padding: '8px 16px',
+        borderRadius: 8,
+        boxShadow: '0 2px 6px rgba(0,0,0,0.2)',
+        fontSize: 14,
+        fontFamily: 'system-ui, sans-serif',
+        textAlign: 'center' as const,
+        pointerEvents: 'none' as const,
+        userSelect: 'none' as const,
+        width: 64,
+    },
+    parCard: {
+        ...cardCommon,
+        background: HATCHED,
+        minWidth: 80,
+    },
+    parLine: { display: 'block' as const },
     topRight: {
         position: 'fixed' as const,
         top: 16,
         right: 16,
-        padding: '10px 14px',
         zIndex: 10,
-        textAlign: 'right' as const,
-        ...cardBase,
+        ...cardCommon,
+        background: HATCHED,
+        textAlign: 'center' as const,
+        minWidth: 76,
     },
-    heading: {
-        fontSize: 18,
-        fontWeight: 600,
-        lineHeight: 1.2,
-    },
-    stat: {
+    windLabel: {
         fontSize: 13,
-        fontWeight: 500,
-        opacity: 0.85,
-        marginTop: 2,
+        fontWeight: 700,
+        marginBottom: 4,
     },
-    windRow: {
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'flex-end',
-        gap: 6,
-        fontSize: 13,
-        fontWeight: 600,
-    },
-    arrow: {
+    windArrow: {
         display: 'inline-block',
-        transformOrigin: 'center center',
-        // wind direction 0 = up (north), rotates clockwise
-        transform: `rotate(${WIND.directionDeg}deg)`,
+        fontSize: 22,
         lineHeight: 1,
-        fontSize: 16,
+        transform: `rotate(${WIND.directionDeg}deg)`,
+        marginBottom: 4,
+    },
+    windSpeed: {
+        fontSize: 15,
+        fontWeight: 700,
+    },
+    flagBadge: {
+        position: 'fixed' as const,
+        top: 22,
+        left: 90,
+        zIndex: 11,
+        background: '#C8543A',
+        color: '#FFF8E7',
+        padding: '2px 8px',
+        fontFamily: 'system-ui, sans-serif',
+        fontSize: 14,
+        fontWeight: 700,
+        borderRadius: 4,
+        boxShadow: '0 1px 4px rgba(0,0,0,0.2)',
+        pointerEvents: 'none' as const,
+        userSelect: 'none' as const,
     },
     distance: {
+        position: 'fixed' as const,
+        top: 96,
+        right: 16,
+        zIndex: 10,
+        color: '#FFF8E7',
+        textShadow: '1px 1px 0 #1a1a1a, -1px 1px 0 #1a1a1a, 1px -1px 0 #1a1a1a, -1px -1px 0 #1a1a1a',
+        fontFamily: 'system-ui, sans-serif',
         fontSize: 13,
-        fontWeight: 500,
-        opacity: 0.85,
-        marginTop: 4,
+        fontWeight: 700,
+        pointerEvents: 'none' as const,
+        userSelect: 'none' as const,
     },
 };
 
-export function HUD({ holeName = 'Hole 1', strokes = 0, distance = 0 }: Props) {
+export function HUD({ strokes = 0, distance = 0 }: Props) {
+    const holeNum = 1;
     return (
         <>
-            <div style={styles.topLeft}>
-                <div style={styles.heading}>{holeName}</div>
-                <div style={styles.stat}>Strokes: {strokes}</div>
-            </div>
-            <div style={styles.topRight}>
-                <div style={styles.windRow}>
-                    <span style={styles.arrow}>↑</span>
-                    <span>{WIND.speedMph} mph</span>
+            <div style={styles.topLeftStack}>
+                <div style={styles.cardBtn}>card</div>
+                <div style={styles.parCard}>
+                    <span style={styles.parLine}>par 4</span>
+                    <span style={styles.parLine}>shot {strokes + 1}</span>
+                    <span style={styles.parLine}>best -</span>
                 </div>
-                <div style={styles.distance}>{distance} px to pin</div>
             </div>
+            <div style={styles.flagBadge}>{holeNum}</div>
+            <div style={styles.topRight}>
+                <div style={styles.windLabel}>wind</div>
+                <div style={styles.windArrow}>↑</div>
+                <div style={styles.windSpeed}>{WIND.speedMph}</div>
+            </div>
+            <div style={styles.distance}>{distance} yds to pin</div>
         </>
     );
 }
