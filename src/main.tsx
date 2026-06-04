@@ -17,4 +17,12 @@ if ('serviceWorker' in navigator && import.meta.env.PROD) {
             console.warn('[sw] registration failed', err);
         });
     });
+    // When a new SW takes control (after a deploy), reload once so the
+    // page picks up the fresh assets instead of serving the stale shell.
+    let refreshing = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+        if (refreshing) return;
+        refreshing = true;
+        window.location.reload();
+    });
 }
