@@ -1,18 +1,20 @@
 import { AUTO, Game, Scale } from 'phaser';
 import { GolfScene } from './scenes/GolfScene';
-import { COLORS, COURSE, DEBUG } from './constants';
+import { COLORS, DEBUG } from './constants';
 
-// Day 1 Phaser config: Matter top-down (no gravity), single GolfScene,
-// FIT scale so the course centers and resizes with the viewport.
+// Day 5 (PPG-fidelity rebuild): canvas fills the window, world is
+// much larger than the viewport, Matter.js drives the ball, the
+// camera follows.
 const config: Phaser.Types.Core.GameConfig = {
     type: AUTO,
-    width:  COURSE.width  + 80,   // a little padding around the course
-    height: COURSE.height + 80,
+    width: typeof window !== 'undefined' ? window.innerWidth : 800,
+    height: typeof window !== 'undefined' ? window.innerHeight : 600,
     parent: 'game-container',
     backgroundColor: COLORS.background,
+    pixelArt: true,
     scale: {
-        mode: Scale.FIT,
-        autoCenter: Scale.CENTER_BOTH,
+        mode: Scale.RESIZE,
+        autoCenter: Scale.NO_CENTER,
     },
     physics: {
         default: 'matter',
