@@ -17,6 +17,13 @@ export const COLORS = {
   aimGuideUnder:  0xF5E0A8,   // muted cream — under-powered, weak shot
   aimGuideSweet:  0x73C47B,   // green — clean strike zone
   aimGuideOver:   0xC8543A,   // red — over-pull mishit zone
+  courseBed:      0x3F6B3A,   // playfield backdrop, slightly darker than rough
+  ballShadow:     0x000000,
+  ballTrail:      0xFFF8E7,
+  verdictBirdie:  0x4A9D5D,
+  verdictPar:     0x3A2814,
+  verdictBogey:   0xC18B3A,
+  verdictWorse:   0xC8543A,
 } as const
 
 export const COURSE = {

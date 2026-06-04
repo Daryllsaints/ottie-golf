@@ -31,6 +31,10 @@ export class GolfScene extends Scene
     private oobIndicator?: Phaser.GameObjects.Text;
     private oobIndicatorHideAt = 0;
     private sinkOverlay?: Phaser.GameObjects.Container;
+    private ballShadow!: Phaser.GameObjects.Ellipse;
+    private trailGfx!: Phaser.GameObjects.Graphics;
+    private trail: Array<{ x: number; y: number; t: number }> = [];
+    private ottieIdleTween?: Phaser.Tweens.Tween;
 
     constructor()
     {
@@ -72,7 +76,17 @@ export class GolfScene extends Scene
 
     update()
     {
-        this.ballSprite.setPosition(this.ballBody.position.x, this.ballBody.position.y);
+        const bx = this.ballBody.position.x;
+        const by = this.ballBody.position.y;
+        this.ballSprite.setPosition(bx, by);
+        this.ballShadow.setPosition(bx + 2, by + 4);
+
+        // Accumulate flight trail.
+        if (this.state === 'IN_FLIGHT' && !this.holeSunk)
+        {
+            this.trail.push({ x: bx, y: by, t: this.time.now });
+        }
+        this.drawTrail();
 
         // Aim guide must redraw every frame while AIMING so the
         // hold-penalty oscillation animates live (sine wave whose
@@ -125,8 +139,28 @@ export class GolfScene extends Scene
                 this.matter.body.setVelocity(this.ballBody as unknown as MatterJS.BodyType, { x: 0, y: 0 });
                 this.state = 'IDLE';
                 this.ottie.setTexture(TEXTURE_OTTIE_READY);
+                this.trail = [];
+                this.trailGfx.clear();
+                this.startOttieIdleBob();
                 EventBus.emit('distance-to-pin', this.computeDistanceToPin());
             }
+        }
+    }
+
+    private drawTrail()
+    {
+        const now = this.time.now;
+        const LIFETIME = 600;
+        // Cull old points.
+        this.trail = this.trail.filter(p => now - p.t < LIFETIME);
+        this.trailGfx.clear();
+        for (const p of this.trail)
+        {
+            const age = (now - p.t) / LIFETIME;
+            const alpha = 1 - age;
+            const r = COURSE.ballRadius * 0.55 * (1 - age);
+            this.trailGfx.fillStyle(COLORS.ballTrail, alpha * 0.5);
+            this.trailGfx.fillCircle(p.x, p.y, r);
         }
     }
 
@@ -140,7 +174,11 @@ export class GolfScene extends Scene
         const holeY = this.courseOffsetY + COURSE.holePosition.y;
         this.matter.body.setPosition(this.ballBody as unknown as MatterJS.BodyType, { x: holeX, y: holeY }, false);
         this.ballSprite.setVisible(false);
+        this.ballShadow.setVisible(false);
+        this.trail = [];
+        this.trailGfx.clear();
         this.ottie.setTexture(TEXTURE_OTTIE_READY);
+        this.startOttieIdleBob();
 
         const diff = this.strokes - HOLE_1_PAR;
         const verdict =
@@ -149,40 +187,76 @@ export class GolfScene extends Scene
             diff === 0  ? 'par'    :
             diff === 1  ? 'bogey'  :
                           `+${diff}`;
+        const verdictColor =
+            diff <  0 ? '#4A9D5D' :
+            diff === 0 ? '#3A2814' :
+            diff === 1 ? '#C18B3A' :
+                         '#C8543A';
+        const subtitle =
+            diff <= -2 ? 'kayyyy!!' :
+            diff === -1 ? 'kayyyy' :
+            diff === 0  ? 'kay.'   :
+            diff === 1  ? 'kay…'   :
+                          '…kay';
 
-        this.showSinkOverlay(verdict);
+        this.showSinkOverlay(verdict, verdictColor, subtitle);
     }
 
-    private showSinkOverlay(verdict: string)
+    private showSinkOverlay(verdict: string, verdictColor: string, subtitle: string)
     {
         const w = this.scale.width;
         const h = this.scale.height;
         const container = this.add.container(0, 0).setDepth(1000);
 
-        const backdrop = this.add.rectangle(0, 0, w, h, 0x1A1A1A, 0.55).setOrigin(0, 0);
+        const backdrop = this.add.rectangle(0, 0, w, h, 0x1A1A1A, 0.5).setOrigin(0, 0);
         container.add(backdrop);
 
-        const cardW = 280;
-        const cardH = 160;
-        const card = this.add.rectangle(w / 2, h / 2, cardW, cardH, 0xFFF8E7, 1)
-            .setStrokeStyle(2, 0xE8922A, 0.9);
+        // Rounded card via Graphics so we can use real corner radius.
+        const cardW = 300;
+        const cardH = 200;
+        const cardX = (w - cardW) / 2;
+        const cardY = (h - cardH) / 2;
+        const cardShadow = this.add.graphics();
+        cardShadow.fillStyle(0x000000, 0.25);
+        cardShadow.fillRoundedRect(cardX + 3, cardY + 6, cardW, cardH, 18);
+        container.add(cardShadow);
+
+        const card = this.add.graphics();
+        card.fillStyle(0xFFF8E7, 1);
+        card.fillRoundedRect(cardX, cardY, cardW, cardH, 18);
+        card.lineStyle(2, 0xE8922A, 0.85);
+        card.strokeRoundedRect(cardX, cardY, cardW, cardH, 18);
         container.add(card);
 
-        const title = this.add.text(w / 2, h / 2 - 40, 'sunk!', {
-            fontFamily: 'system-ui, sans-serif', fontSize: '28px',
-            color: '#E8922A', fontStyle: 'bold',
-        }).setOrigin(0.5);
-        container.add(title);
+        // Layout inside the card
+        const eyebrow = this.add.text(w / 2, cardY + 28, 'SUNK', {
+            fontFamily: 'system-ui, sans-serif', fontSize: '11px',
+            color: '#A68B6D', fontStyle: 'bold',
+            letterSpacing: '2px',
+        } as Phaser.Types.GameObjects.Text.TextStyle).setOrigin(0.5);
+        container.add(eyebrow);
 
-        const detail = this.add.text(w / 2, h / 2, `${this.strokes} strokes · ${verdict}`, {
-            fontFamily: 'system-ui, sans-serif', fontSize: '16px',
+        const big = this.add.text(w / 2, cardY + 70, verdict, {
+            fontFamily: 'system-ui, sans-serif', fontSize: '32px',
+            color: verdictColor, fontStyle: 'bold',
+        }).setOrigin(0.5);
+        container.add(big);
+
+        const strokeLine = this.add.text(w / 2, cardY + 110, `${this.strokes} stroke${this.strokes === 1 ? '' : 's'} · par ${HOLE_1_PAR}`, {
+            fontFamily: 'system-ui, sans-serif', fontSize: '14px',
             color: '#3A2814',
         }).setOrigin(0.5);
-        container.add(detail);
+        container.add(strokeLine);
 
-        const hint = this.add.text(w / 2, h / 2 + 40, 'tap to replay', {
-            fontFamily: 'system-ui, sans-serif', fontSize: '13px',
-            color: '#857060', fontStyle: 'italic',
+        const kay = this.add.text(w / 2, cardY + 140, subtitle, {
+            fontFamily: 'system-ui, sans-serif', fontSize: '15px',
+            color: '#E8922A', fontStyle: 'italic',
+        }).setOrigin(0.5);
+        container.add(kay);
+
+        const hint = this.add.text(w / 2, cardY + 175, 'tap to replay', {
+            fontFamily: 'system-ui, sans-serif', fontSize: '12px',
+            color: '#A68B6D', fontStyle: 'italic',
         }).setOrigin(0.5);
         container.add(hint);
 
@@ -222,6 +296,9 @@ export class GolfScene extends Scene
         this.matter.body.setVelocity(this.ballBody as unknown as MatterJS.BodyType, { x: 0, y: 0 });
         this.matter.body.setPosition(this.ballBody as unknown as MatterJS.BodyType, { x: teeX, y: teeY }, false);
         this.ballSprite.setVisible(true);
+        this.ballShadow.setVisible(true);
+        this.trail = [];
+        this.trailGfx.clear();
         this.strokes = 0;
         this.holeSunk = false;
         this.state = 'IDLE';
@@ -259,6 +336,16 @@ export class GolfScene extends Scene
 
     private drawCourse()
     {
+        // Playfield backdrop — a rounded rectangle behind everything so
+        // the course has a defined edge against the brown background.
+        const bed = this.add.graphics();
+        bed.fillStyle(COLORS.courseBed, 1);
+        bed.fillRoundedRect(
+            this.courseOffsetX, this.courseOffsetY,
+            COURSE.width, COURSE.height, 22,
+        );
+        bed.setDepth(-1);
+
         // Outer rough silhouette (slightly larger than the fairway).
         const rough = this.add.graphics();
         rough.fillStyle(COLORS.rough, 1);
@@ -361,6 +448,28 @@ export class GolfScene extends Scene
             ballX - 28, ballY - 8,
             TEXTURE_OTTIE_READY,
         ).setOrigin(0.5, 0.85).setDepth(7).setScale(0.4);
+        this.startOttieIdleBob();
+    }
+
+    private startOttieIdleBob()
+    {
+        this.ottieIdleTween?.stop();
+        this.ottieIdleTween = this.tweens.add({
+            targets: this.ottie,
+            scaleX: 0.42,
+            scaleY: 0.38,
+            duration: 1400,
+            ease: 'Sine.easeInOut',
+            yoyo: true,
+            repeat: -1,
+        });
+    }
+
+    private stopOttieIdleBob()
+    {
+        this.ottieIdleTween?.stop();
+        this.ottieIdleTween = undefined;
+        this.ottie.setScale(0.4);
     }
 
     private placeBall()
@@ -373,8 +482,14 @@ export class GolfScene extends Scene
             density:     BALL_PHYSICS.density,
             label: 'ball',
         }) as unknown as MatterBodyLike;
+        this.ballShadow = this.add.ellipse(
+            ballX + 2, ballY + 4,
+            COURSE.ballRadius * 2.0, COURSE.ballRadius * 1.1,
+            COLORS.ballShadow, 0.25,
+        ).setDepth(19);
         this.ballSprite = this.add.circle(ballX, ballY, COURSE.ballRadius, COLORS.ball, 1)
             .setStrokeStyle(1, 0x444444, 0.6).setDepth(20);
+        this.trailGfx = this.add.graphics().setDepth(18);
     }
 
     private translatePath(path: ReadonlyArray<{ x: number; y: number }>)
@@ -472,6 +587,7 @@ export class GolfScene extends Scene
         this.state = 'IN_FLIGHT';
         this.strokes += 1;
         EventBus.emit('strokes-changed', this.strokes);
+        this.stopOttieIdleBob();
         this.ottie.setTexture(TEXTURE_OTTIE_SWING);
     }
 
