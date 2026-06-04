@@ -1,4 +1,4 @@
-// Day 5 GolfScene — PPG-fidelity tile-based renderer with scrolling
+// Day 5 GolfScene: PPG-fidelity tile-based renderer with scrolling
 // camera. Course is built from Pixellab Wang tilesets (ocean→grass,
 // grass→sand, grass→green). Trees scatter along the rough edges.
 // Camera follows the ball.
@@ -111,7 +111,7 @@ export class GolfScene extends Scene {
         // Camera: cover-zoom so the world fills the frame (no brown
         // letterbox). The world is portrait-aspect; phones are even
         // more elongated, so fitting by width crops a bit of ocean
-        // off the top/bottom — fine, the green and tee both stay in
+        // off the top/bottom; fine, the green and tee both stay in
         // view because they sit in the middle of the world.
         this.overviewZoom = this.computeOverviewZoom();
         this.applyOverviewCamera();
@@ -169,7 +169,7 @@ export class GolfScene extends Scene {
             const speed = Math.hypot(v.x, v.y);
             if (speed < SWING.restSpeedThreshold) {
                 this.matter.body.setVelocity(this.ballBody as unknown as MatterJS.BodyType, { x: 0, y: 0 });
-                // Water hazard check — if the ball came to rest in the
+                // Water hazard check: if the ball came to rest in the
                 // ocean (i.e. the player missed the green island), apply
                 // a one-stroke penalty and respawn at the tee.
                 if (isOverWater(this.grid, bx, by)) {
@@ -272,11 +272,11 @@ export class GolfScene extends Scene {
 
                 // ── LAYER 1: ocean/grass-family boundary ──
                 if (same === 'ocean') {
-                    // Pure ocean cell — flat blue base already covers; skip.
+                    // Pure ocean cell, flat blue base already covers; skip.
                 } else if (same !== null) {
                     // All 4 corners are the same NON-ocean terrain. Fill the cell
                     // with a clean grass-family color (rough/fairway/sand/green all
-                    // get rendered by their own layers below — here we just paint
+                    // get rendered by their own layers below; here we just paint
                     // a clean rough as the land base).
                     this.add.rectangle(cx, cy, TILE_PX, TILE_PX, COLORS.fillRough, 1).setDepth(0);
                 } else {
@@ -292,7 +292,7 @@ export class GolfScene extends Scene {
                 if (allSame(corners) === 'fairway') {
                     this.add.rectangle(cx, cy, TILE_PX, TILE_PX, COLORS.fillFairway, 1).setDepth(1);
                 } else if (anyIs(corners, 'fairway') && !anyIs(corners, 'ocean')) {
-                    // Rough/fairway boundary cell — paint a translucent fairway
+                    // Rough/fairway boundary cell: paint a translucent fairway
                     // edge so the corridor reads as a soft shape against rough.
                     this.add.rectangle(cx, cy, TILE_PX, TILE_PX, COLORS.fillFairway, 0.55).setDepth(1);
                 }
@@ -369,7 +369,7 @@ export class GolfScene extends Scene {
         if (dist < 20) return;
         const ux = dx / dist;
         const uy = dy / dist;
-        // Dashed line from ball to cup — 12px dashes, 10px gaps.
+        // Dashed line from ball to cup: 12px dashes, 10px gaps.
         const dashLen = 14;
         const gapLen = 10;
         const seg = dashLen + gapLen;
@@ -392,7 +392,7 @@ export class GolfScene extends Scene {
 
     /** Cover-fit zoom: scale so the world fills the viewport on its
      *  smaller dimension. The larger dimension overflows and gets
-     *  cropped offscreen — acceptable here because the gameplay
+     *  cropped offscreen, acceptable here because the gameplay
      *  (green + tee) sits in the world center. Capped at 2.0 so we
      *  never blow up the art at silly scales. */
     private computeOverviewZoom(): number {
@@ -608,7 +608,7 @@ export class GolfScene extends Scene {
         // Aim guide always renders FROM the ball, regardless of where
         // the finger touched. Drag distance/direction still drives the
         // shot, but the line shows the shot trajectory relative to the
-        // ball — which is the bit the player actually cares about.
+        // ball, which is the bit the player actually cares about.
         const bx = this.ballBody.position.x;
         const by = this.ballBody.position.y;
         const endX = bx + Math.cos(oscAngle) * clamped;
