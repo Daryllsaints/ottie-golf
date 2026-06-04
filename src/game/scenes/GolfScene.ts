@@ -79,6 +79,7 @@ export class GolfScene extends Scene {
     private tutSwingContainer?: Phaser.GameObjects.Container;
     private tutSwingTween?: Phaser.Tweens.Tween;
     private firstShotTaken = false;
+    private armedHeckleLevel = 0;
 
     constructor() { super('GolfScene'); }
 
@@ -152,6 +153,13 @@ export class GolfScene extends Scene {
 
         // First-launch onboarding: drag-to-swing finger animation.
         this.maybeShowSwingHint();
+
+        // React side dispatches this after loading a match if the
+        // opponent sent a heckle. Scene applies the jitter to the
+        // very next swing release.
+        EventBus.on('heckle-armed', (level: number) => {
+            this.armedHeckleLevel = Math.max(0, Math.min(100, level));
+        });
     }
 
     update(_t: number, _dt: number) {
@@ -768,6 +776,16 @@ export class GolfScene extends Scene {
             powerMul = SWING.overpowerPenalty;
             const jitterRad = (Math.random() - 0.5) * 2 * SWING.overpowerJitterDeg * Math.PI / 180;
             finalAngle += jitterRad;
+        }
+
+        // Heckle handicap: aim jitter proportional to opponent's mash
+        // intensity. 100% heckle = up to 12 degrees of release wobble.
+        // Applied once and then disarmed so it never carries to a later shot.
+        if (this.armedHeckleLevel > 0) {
+            const maxDeg = (this.armedHeckleLevel / 100) * 12;
+            const heckleJitterRad = (Math.random() - 0.5) * 2 * maxDeg * Math.PI / 180;
+            finalAngle += heckleJitterRad;
+            this.armedHeckleLevel = 0;
         }
 
         const speed = powerMul * SWING.maxSpeed;

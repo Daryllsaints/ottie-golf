@@ -26,6 +26,7 @@ export type Shot = {
     strokes: number;
     sunk: boolean;
     oob_count: number;
+    heckle_level: number;
     created_at: string;
 };
 
@@ -109,8 +110,9 @@ export async function joinOrLoadMatch(code: string): Promise<{ match: Match; me:
     return { match, me: 'B' };
 }
 
-/** Records a completed hole as a shot row. */
-export async function saveShot(matchId: string, hole: number, player: 'A' | 'B', strokes: number, sunk: boolean, oobCount: number): Promise<void> {
+/** Records a completed hole as a shot row. heckleLevel is 0-100, the
+ *  intensity this shooter pre-mashed for the NEXT player. */
+export async function saveShot(matchId: string, hole: number, player: 'A' | 'B', strokes: number, sunk: boolean, oobCount: number, heckleLevel = 0): Promise<void> {
     if (!supabase) return;
     const { error } = await supabase.from('og_shots').insert({
         match_id: matchId,
@@ -119,8 +121,21 @@ export async function saveShot(matchId: string, hole: number, player: 'A' | 'B',
         strokes,
         sunk,
         oob_count: oobCount,
+        heckle_level: Math.max(0, Math.min(100, Math.round(heckleLevel))),
     });
     if (error) console.warn('[match] saveShot failed', error.message);
+}
+
+/** Returns the pending heckle for me — the most recent opponent shot
+ *  with heckle_level > 0, IFF I have not recorded a shot since.
+ *  null means no pending heckle. */
+export function pendingHeckleFor(me: 'A' | 'B', shots: Shot[]): { level: number; fromPlayer: 'A' | 'B' } | null {
+    const opponent: 'A' | 'B' = me === 'A' ? 'B' : 'A';
+    const lastOppHeckle = [...shots].reverse().find(s => s.player === opponent && s.heckle_level > 0);
+    if (!lastOppHeckle) return null;
+    const myShotsAfter = shots.filter(s => s.player === me && s.created_at > lastOppHeckle.created_at);
+    if (myShotsAfter.length > 0) return null;
+    return { level: lastOppHeckle.heckle_level, fromPlayer: opponent };
 }
 
 export async function loadShots(matchId: string): Promise<Shot[]> {
