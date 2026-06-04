@@ -604,6 +604,7 @@ export class GolfScene extends Scene {
 
     private sinkBall() {
         this.holeSunk = true;
+        EventBus.emit('ball-sunk', this.strokes);
         this.matter.body.setVelocity(this.ballBody as unknown as MatterJS.BodyType, { x: 0, y: 0 });
         this.matter.body.setPosition(this.ballBody as unknown as MatterJS.BodyType, { x: HOLE_WORLD.x, y: HOLE_WORLD.y }, false);
         this.ballSprite.setVisible(false);
