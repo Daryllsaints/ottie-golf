@@ -10,6 +10,8 @@ type Props = {
     holeName?: string;
     strokes?: number;
     distance?: number;
+    holeNum?: number;
+    holeCount?: number;
 };
 
 const HATCHED = 'repeating-linear-gradient(-45deg, #2d4a2d, #2d4a2d 5px, #1f3a1f 5px, #1f3a1f 10px)';
@@ -65,6 +67,15 @@ const styles = {
         opacity: 0.7,
         marginTop: 4,
         fontStyle: 'italic' as const,
+    },
+    holeCounter: {
+        display: 'block' as const,
+        fontSize: 10,
+        fontWeight: 700,
+        letterSpacing: 1.5,
+        color: '#E8922A',
+        textTransform: 'uppercase' as const,
+        marginBottom: 2,
     },
     topRight: {
         position: 'fixed' as const,
@@ -123,12 +134,16 @@ const styles = {
     },
 };
 
-export function HUD({ strokes = 0, distance = 0 }: Props) {
+export function HUD({ strokes = 0, distance = 0, holeNum, holeCount }: Props) {
+    const showHoleCounter = typeof holeNum === 'number' && typeof holeCount === 'number';
     return (
         <>
             <div style={styles.topLeftStack}>
                 <div style={styles.cardBtn}>card</div>
                 <div style={styles.parCard}>
+                    {showHoleCounter && (
+                        <span style={styles.holeCounter}>hole {holeNum} of {holeCount}</span>
+                    )}
                     <span style={styles.parLine}>{ACTIVE_HOLE.name}</span>
                     <span style={styles.parLine}>par {ACTIVE_HOLE.par} · shot {strokes + 1}</span>
                     <span style={styles.subLine}>after {ACTIVE_HOLE.inspiration}</span>

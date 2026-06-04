@@ -157,3 +157,23 @@ export function matchUrl(code: string): string {
     if (typeof window === 'undefined') return `/m/${code}`;
     return `${window.location.origin}/m/${code}`;
 }
+
+/** Current hole (1-indexed) for the given player, derived from their
+ *  sunk shots. Returns totalHoles + 1 if they have finished the round. */
+export function currentHoleForPlayer(player: 'A' | 'B', shots: Shot[]): number {
+    return shots.filter(s => s.player === player && s.sunk).length + 1;
+}
+
+/** Marks the whole match complete in the DB once both players have
+ *  finished. Safe to call repeatedly. */
+export async function markMatchCompleteIfDone(matchId: string, shots: Shot[], totalHoles: number): Promise<void> {
+    if (!supabase) return;
+    const aDone = currentHoleForPlayer('A', shots) > totalHoles;
+    const bDone = currentHoleForPlayer('B', shots) > totalHoles;
+    if (!(aDone && bDone)) return;
+    const { error } = await supabase
+        .from('og_matches')
+        .update({ status: 'complete' })
+        .eq('id', matchId);
+    if (error) console.warn('[match] markMatchCompleteIfDone failed', error.message);
+}

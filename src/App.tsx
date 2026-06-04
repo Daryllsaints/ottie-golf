@@ -4,8 +4,8 @@ import { HUD } from './ui/HUD';
 import { MenuScreen } from './ui/MenuScreen';
 import { ShareCard } from './ui/ShareCard';
 import { EventBus } from './game/EventBus';
-import { joinOrLoadMatch, loadShots, pendingHeckleFor, saveShot, type Match, type Shot } from './lib/match';
-import { ACTIVE_HOLE } from './game/terrain';
+import { currentHoleForPlayer, joinOrLoadMatch, loadShots, markMatchCompleteIfDone, pendingHeckleFor, saveShot, type Match, type Shot } from './lib/match';
+import { ACTIVE_HOLE, HOLES, setHoleIndex, activeHoleIndex } from './game/terrain';
 
 type Route =
     | { kind: 'menu' }
@@ -32,7 +32,16 @@ function App() {
     const [finalStrokes, setFinalStrokes] = useState(0);
     const [pendingHeckleLevel, setPendingHeckleLevel] = useState(0);
     const [showHeckleToast, setShowHeckleToast] = useState(false);
+    const [holeIdx, setHoleIdx] = useState(0);
+    const [matchComplete, setMatchComplete] = useState(false);
     const pendingHeckleCommitRef = useRef(0);
+
+    function restartSceneForHole(nextIdx: number) {
+        setHoleIndex(nextIdx);
+        setHoleIdx(nextIdx);
+        const scene = phaserRef.current?.scene;
+        if (scene) scene.scene.restart();
+    }
 
     // Subscribe to scene events for HUD + sink detection
     useEffect(() => {
@@ -40,13 +49,17 @@ function App() {
         const distanceHandler = (n: number) => setDistance(n);
         const sunkHandler = async (n: number) => {
             setFinalStrokes(n);
+            const playedHoleNum = activeHoleIndex() + 1;
+            const isLastHole = activeHoleIndex() >= HOLES.length - 1;
             if (route.kind === 'match' && match) {
-                await saveShot(match.id, ACTIVE_HOLE.par, me, n, true, 0, pendingHeckleCommitRef.current);
+                await saveShot(match.id, playedHoleNum, me, n, true, 0, pendingHeckleCommitRef.current);
                 pendingHeckleCommitRef.current = 0;
                 const fresh = await loadShots(match.id);
                 setShots(fresh);
+                await markMatchCompleteIfDone(match.id, fresh, HOLES.length);
             }
-            setShowShareCard(route.kind === 'match');
+            if (isLastHole) setMatchComplete(true);
+            setShowShareCard(route.kind === 'match' || route.kind === 'solo');
         };
         EventBus.on('strokes-changed', strokesHandler);
         EventBus.on('distance-to-pin', distanceHandler);
@@ -70,6 +83,13 @@ function App() {
             const fresh = await loadShots(result.match.id);
             if (cancelled) return;
             setShots(fresh);
+            // Per-player hole tracking: each player resumes at their next
+            // unfinished hole, regardless of where the opponent is.
+            const myHole1Indexed = currentHoleForPlayer(result.me, fresh);
+            const idx = Math.max(0, Math.min(HOLES.length - 1, myHole1Indexed - 1));
+            setHoleIndex(idx);
+            setHoleIdx(idx);
+            if (myHole1Indexed > HOLES.length) setMatchComplete(true);
             // Check for a pending heckle from the opponent. If found,
             // arm it for the next swing and surface the toast.
             const pending = pendingHeckleFor(result.me, fresh);
@@ -90,10 +110,20 @@ function App() {
         return <MenuScreen onPlaySolo={() => setRoute({ kind: 'solo' })} />;
     }
 
+    const myTotal       = useMemo(() => myShots.reduce((s, x) => s + x.strokes, 0), [myShots]);
+    const opponentTotal = useMemo(() => opponentShots.reduce((s, x) => s + x.strokes, 0), [opponentShots]);
+    const totalPar      = useMemo(() => HOLES.reduce((s, h) => s + h.par, 0), []);
+
     return (
         <div id="app">
             <PhaserGame ref={phaserRef} />
-            <HUD holeName={ACTIVE_HOLE.name} strokes={strokes} distance={distance} />
+            <HUD
+                holeName={ACTIVE_HOLE.name}
+                strokes={strokes}
+                distance={distance}
+                holeNum={holeIdx + 1}
+                holeCount={HOLES.length}
+            />
             {showShareCard && match && (
                 <ShareCard
                     matchId={match.id}
@@ -101,8 +131,18 @@ function App() {
                     myShots={myShots}
                     opponentShots={opponentShots}
                     par={ACTIVE_HOLE.par}
-                    onDismiss={() => setShowShareCard(false)}
+                    onDismiss={() => {
+                        setShowShareCard(false);
+                        if (!matchComplete) {
+                            restartSceneForHole(holeIdx + 1);
+                        }
+                    }}
                     onHeckleCommit={(level) => { pendingHeckleCommitRef.current = level; }}
+                    matchComplete={matchComplete}
+                    myTotal={myTotal}
+                    opponentTotal={opponentTotal}
+                    totalPar={totalPar}
+                    nextLabel={matchComplete ? 'match complete' : `next hole (${holeIdx + 2})`}
                 />
             )}
             {showHeckleToast && (

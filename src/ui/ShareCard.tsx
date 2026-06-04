@@ -14,6 +14,11 @@ type Props = {
     par: number;
     onDismiss: () => void;
     onHeckleCommit?: (level: number) => void;
+    matchComplete?: boolean;
+    myTotal?: number;
+    opponentTotal?: number;
+    totalPar?: number;
+    nextLabel?: string;
 };
 
 const HECKLE_WINDOW_MS = 4000;
@@ -113,7 +118,7 @@ function verdict(strokes: number, par: number): string {
     return `+${d}`;
 }
 
-export function ShareCard({ matchId, me, myShots, opponentShots, par, onDismiss, onHeckleCommit }: Props) {
+export function ShareCard({ matchId, me, myShots, opponentShots, par, onDismiss, onHeckleCommit, matchComplete = false, myTotal, opponentTotal, totalPar, nextLabel }: Props) {
     const [copied, setCopied] = useState(false);
     const myStrokes = myShots[myShots.length - 1]?.strokes ?? 0;
     const oppStrokes = opponentShots[opponentShots.length - 1]?.strokes ?? null;
@@ -188,20 +193,33 @@ export function ShareCard({ matchId, me, myShots, opponentShots, par, onDismiss,
         }
     }
 
+    const showTotals = typeof myTotal === 'number' && typeof totalPar === 'number';
+    const titleText = matchComplete
+        ? (showTotals ? `match ${verdict(myTotal!, totalPar!)}` : verdict(myStrokes, par))
+        : verdict(myStrokes, par);
+
     return (
         <div style={styles.backdrop} onClick={onDismiss}>
             <div style={styles.card} onClick={(e) => e.stopPropagation()}>
-                <div style={styles.eyebrow}>SUNK</div>
-                <div style={styles.title}>{verdict(myStrokes, par)}</div>
-                <div style={styles.sub}>{myStrokes} stroke{myStrokes === 1 ? '' : 's'} · par {par}</div>
+                <div style={styles.eyebrow}>{matchComplete ? 'FINAL' : 'SUNK'}</div>
+                <div style={styles.title}>{titleText}</div>
+                <div style={styles.sub}>
+                    {matchComplete && showTotals
+                        ? `${myTotal} total · par ${totalPar}`
+                        : `${myStrokes} stroke${myStrokes === 1 ? '' : 's'} · par ${par}`}
+                </div>
                 <div style={styles.scoreboard}>
                     <div style={styles.scoreCell}>
                         <div style={styles.scoreLabel}>YOU</div>
-                        <div style={styles.scoreNum}>{myStrokes}</div>
+                        <div style={styles.scoreNum}>{matchComplete && showTotals ? myTotal : myStrokes}</div>
                     </div>
                     <div style={styles.scoreCell}>
                         <div style={styles.scoreLabel}>{me === 'A' ? 'PLAYER B' : 'PLAYER A'}</div>
-                        <div style={styles.scoreNum}>{oppStrokes ?? '—'}</div>
+                        <div style={styles.scoreNum}>
+                            {matchComplete && typeof opponentTotal === 'number'
+                                ? opponentTotal
+                                : (oppStrokes ?? '—')}
+                        </div>
                     </div>
                 </div>
                 <div style={styles.heckleBlock}>
@@ -227,8 +245,10 @@ export function ShareCard({ matchId, me, myShots, opponentShots, par, onDismiss,
                 <button style={styles.shareBtn} onClick={handleShare}>
                     {oppStrokes === null ? 'send the link · their turn' : 'send your score'}
                 </button>
-                {copied && <div style={styles.copied}>link copied — paste into iMessage</div>}
-                <button style={styles.closeBtn} onClick={onDismiss}>play again</button>
+                {copied && <div style={styles.copied}>link copied, paste into iMessage</div>}
+                <button style={styles.closeBtn} onClick={onDismiss}>
+                    {nextLabel ?? 'play again'}
+                </button>
             </div>
         </div>
     );
