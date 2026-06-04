@@ -1,0 +1,26 @@
+{
+  "name": "Ottie Golf",
+  "short_name": "Ottie Golf",
+  "description": "Cozy turn-based mini-golf playable through iMessage.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#4E342E",
+  "theme_color": "#4E342E",
+  "categories": ["games", "sports"],
+  "icons": [
+    {
+      "src": "/sprites/ottie-ready.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/sprites/ottie-ready.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
