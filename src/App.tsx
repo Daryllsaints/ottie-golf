@@ -105,14 +105,13 @@ function App() {
 
     const myShots       = useMemo(() => shots.filter(s => s.player === me), [shots, me]);
     const opponentShots = useMemo(() => shots.filter(s => s.player !== me), [shots, me]);
+    const myTotal       = useMemo(() => myShots.reduce((s, x) => s + x.strokes, 0), [myShots]);
+    const opponentTotal = useMemo(() => opponentShots.reduce((s, x) => s + x.strokes, 0), [opponentShots]);
+    const totalPar      = useMemo(() => HOLES.reduce((s, h) => s + h.par, 0), []);
 
     if (route.kind === 'menu') {
         return <MenuScreen onPlaySolo={() => setRoute({ kind: 'solo' })} />;
     }
-
-    const myTotal       = useMemo(() => myShots.reduce((s, x) => s + x.strokes, 0), [myShots]);
-    const opponentTotal = useMemo(() => opponentShots.reduce((s, x) => s + x.strokes, 0), [opponentShots]);
-    const totalPar      = useMemo(() => HOLES.reduce((s, h) => s + h.par, 0), []);
 
     return (
         <div id="app">
