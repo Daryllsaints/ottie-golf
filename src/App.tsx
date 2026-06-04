@@ -123,6 +123,8 @@ function App() {
                 setPendingHeckleLevel(pending.level);
                 setShowHeckleToast(true);
                 EventBus.emit('heckle-armed', pending.level);
+                // Scene plays the heckle SFX (it owns Phaser's audio cache).
+                EventBus.emit('heckle-sfx');
                 // Rumble-tap haptic where supported.
                 if (typeof navigator !== 'undefined' && navigator.vibrate) {
                     navigator.vibrate([60, 40, 60, 40, 120]);

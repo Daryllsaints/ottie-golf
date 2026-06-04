@@ -38,6 +38,15 @@ const TEX = {
     ottieSwing:    'ottie-swing',
 } as const;
 
+const SFX = {
+    swing:     'sfx-swing',
+    sink:      'sfx-sink',
+    cupRattle: 'sfx-cup-rattle',
+    splash:    'sfx-splash',
+    heckle:    'sfx-heckle',
+    tap:       'sfx-tap',
+} as const;
+
 const JSON_KEY = {
     oceanRough:    'jsts-ocean-rough',
     roughFairway:  'jsts-rough-fairway',
@@ -100,6 +109,13 @@ export class GolfScene extends Scene {
         this.load.image(TEX.tree,       '/sprites/tree.png');
         this.load.image(TEX.ottie,      '/sprites/ottie-ready.png');
         this.load.image(TEX.ottieSwing, '/sprites/ottie-swing.png');
+        // SFX (Kenney CC0 packs, see CREDITS.md)
+        this.load.audio(SFX.swing,     '/sounds/swing.ogg');
+        this.load.audio(SFX.sink,      '/sounds/sink.ogg');
+        this.load.audio(SFX.cupRattle, '/sounds/cup-rattle.ogg');
+        this.load.audio(SFX.splash,    '/sounds/splash.ogg');
+        this.load.audio(SFX.heckle,    '/sounds/heckle.ogg');
+        this.load.audio(SFX.tap,       '/sounds/tap.ogg');
     }
 
     create() {
@@ -161,6 +177,7 @@ export class GolfScene extends Scene {
         EventBus.on('heckle-armed', (level: number) => {
             this.armedHeckleLevel = Math.max(0, Math.min(100, level));
         });
+        EventBus.on('heckle-sfx', () => this.sfx(SFX.heckle, 0.7));
     }
 
     update(_t: number, _dt: number) {
@@ -228,6 +245,7 @@ export class GolfScene extends Scene {
         this.waterHazardsThisHole += 1;
         if (!isMulligan) this.strokes += 1;
         this.haptic(isMulligan ? [40] : [80, 40, 40]);
+        this.sfx(SFX.splash, 0.55);
         this.state = 'IDLE';
         this.ottie.setTexture(TEX.ottie);
         this.trail = [];
@@ -444,6 +462,19 @@ export class GolfScene extends Scene {
     private haptic(pattern: number[]) {
         if (typeof navigator !== 'undefined' && navigator.vibrate) {
             navigator.vibrate(pattern);
+        }
+    }
+
+    /** Play a sfx by key. Wraps Phaser's sound system with a try/catch
+     *  because iOS Safari blocks audio until the first user gesture
+     *  and the AudioContext can throw 'NotAllowedError' on autoplay. */
+    private sfx(key: string, volume = 0.6) {
+        try {
+            this.sound.play(key, { volume });
+        } catch (err) {
+            // First-touch unlock has not happened yet, or device denies audio.
+            // Silent fail keeps gameplay flowing.
+            void err;
         }
     }
 
@@ -837,6 +868,7 @@ export class GolfScene extends Scene {
         this.state = 'IN_FLIGHT';
         this.strokes += 1;
         this.haptic([18]);
+        this.sfx(SFX.swing, 0.55);
         EventBus.emit('strokes-changed', this.strokes);
         this.stopOttieIdleBob();
         this.ottie.setTexture(TEX.ottieSwing);
@@ -919,6 +951,8 @@ export class GolfScene extends Scene {
     private sinkBall() {
         this.holeSunk = true;
         this.haptic([30, 50, 30, 50, 60]);
+        this.sfx(SFX.cupRattle, 0.5);
+        this.time.delayedCall(220, () => this.sfx(SFX.sink, 0.65));
         this.matter.body.setVelocity(this.ballBody as unknown as MatterJS.BodyType, { x: 0, y: 0 });
         this.matter.body.setPosition(this.ballBody as unknown as MatterJS.BodyType, { x: HOLE_WORLD.x, y: HOLE_WORLD.y }, false);
         this.trail = [];
