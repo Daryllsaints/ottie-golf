@@ -6,6 +6,8 @@ import { supabase } from './supabase';
 
 const SESSION_KEY = 'ottiegolf:sessionId';
 const NAME_KEY = 'ottiegolf:name';
+const SEEN_MATCHES_KEY = 'ottiegolf:seenMatches';
+const MAX_SEEN_MATCHES = 10;
 
 export type Match = {
     id: string;
@@ -183,6 +185,88 @@ export async function loadShots(matchId: string): Promise<Shot[]> {
 export function matchUrl(code: string): string {
     if (typeof window === 'undefined') return `/m/${code}`;
     return `${window.location.origin}/m/${code}`;
+}
+
+// ─── Match history (per-browser) ──────────────────────────────────
+
+/** Records that this browser has touched the given match id. Most
+ *  recent first; capped at MAX_SEEN_MATCHES. */
+export function rememberMatch(matchId: string): void {
+    try {
+        const raw = window.localStorage.getItem(SEEN_MATCHES_KEY);
+        const list: string[] = raw ? JSON.parse(raw) : [];
+        const next = [matchId, ...list.filter(x => x !== matchId)].slice(0, MAX_SEEN_MATCHES);
+        window.localStorage.setItem(SEEN_MATCHES_KEY, JSON.stringify(next));
+    } catch { /* ignore */ }
+}
+
+export function rememberedMatchIds(): string[] {
+    try {
+        const raw = window.localStorage.getItem(SEEN_MATCHES_KEY);
+        if (!raw) return [];
+        const list = JSON.parse(raw);
+        return Array.isArray(list) ? list.filter(x => typeof x === 'string') : [];
+    } catch { return []; }
+}
+
+export type MatchHistoryEntry = {
+    matchId: string;
+    me: 'A' | 'B' | null;
+    myTotal: number;
+    opponentTotal: number;
+    opponentName: string | null;
+    status: Match['status'];
+    holesPlayed: number;
+    totalHoles: number;
+    updatedAt: string;
+};
+
+/** Load the most-recent N matches this browser has touched. Returns
+ *  enriched entries with running totals and the opponent's name. */
+export async function loadMatchHistory(totalHoles: number, limit = 5): Promise<MatchHistoryEntry[]> {
+    if (!supabase) return [];
+    const ids = rememberedMatchIds().slice(0, limit);
+    if (ids.length === 0) return [];
+    const meId = sessionId();
+
+    const { data: matches, error: matchErr } = await supabase
+        .from('og_matches')
+        .select()
+        .in('id', ids);
+    if (matchErr || !matches) return [];
+
+    const { data: allShots, error: shotsErr } = await supabase
+        .from('og_shots')
+        .select()
+        .in('match_id', ids);
+    if (shotsErr) return [];
+
+    const entries: MatchHistoryEntry[] = [];
+    for (const id of ids) {
+        const m = matches.find(x => x.id === id) as Match | undefined;
+        if (!m) continue;
+        const me: 'A' | 'B' | null =
+            m.player_a_id === meId ? 'A' :
+            m.player_b_id === meId ? 'B' : null;
+        if (me === null) continue;
+        const myShots = (allShots ?? []).filter(s => s.match_id === id && s.player === me) as Shot[];
+        const oppShots = (allShots ?? []).filter(s => s.match_id === id && s.player !== me) as Shot[];
+        const myTotal = myShots.reduce((s, x) => s + x.strokes, 0);
+        const opponentTotal = oppShots.reduce((s, x) => s + x.strokes, 0);
+        const opponentName = me === 'A' ? m.player_b_name : m.player_a_name;
+        const holesPlayed = Math.min(totalHoles, currentHoleForPlayer(me, [...myShots, ...oppShots]) - 1);
+        entries.push({
+            matchId: id,
+            me,
+            myTotal, opponentTotal,
+            opponentName: opponentName ?? null,
+            status: m.status,
+            holesPlayed,
+            totalHoles,
+            updatedAt: m.updated_at,
+        });
+    }
+    return entries;
 }
 
 /** Current hole (1-indexed) for the given player, derived from their

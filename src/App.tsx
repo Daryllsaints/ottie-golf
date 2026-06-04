@@ -4,7 +4,7 @@ import { HUD } from './ui/HUD';
 import { MenuScreen } from './ui/MenuScreen';
 import { ShareCard } from './ui/ShareCard';
 import { EventBus } from './game/EventBus';
-import { currentHoleForPlayer, joinOrLoadMatch, loadShots, markMatchCompleteIfDone, pendingHeckleFor, saveShot, type Match, type Shot } from './lib/match';
+import { currentHoleForPlayer, joinOrLoadMatch, loadShots, markMatchCompleteIfDone, pendingHeckleFor, rememberMatch, saveShot, type Match, type Shot } from './lib/match';
 import { ACTIVE_HOLE, HOLES, setHoleIndex, activeHoleIndex } from './game/terrain';
 
 type Route =
@@ -103,6 +103,7 @@ function App() {
         (async () => {
             const result = await joinOrLoadMatch(route.code);
             if (cancelled || !result) return;
+            rememberMatch(result.match.id);
             setMatch(result.match);
             setMe(result.me);
             const fresh = await loadShots(result.match.id);

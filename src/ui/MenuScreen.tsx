@@ -2,8 +2,8 @@
 // multiplayer wiring. "Start Match" creates a match record and
 // navigates to /m/:code so the player can share the URL.
 
-import { useState } from 'react';
-import { createMatch, displayName, matchUrl, setDisplayName } from '../lib/match';
+import { useEffect, useState } from 'react';
+import { createMatch, displayName, loadMatchHistory, matchUrl, setDisplayName, type MatchHistoryEntry } from '../lib/match';
 import { HOLES } from '../game/terrain';
 
 type Props = { onPlaySolo: () => void };
@@ -62,13 +62,50 @@ const styles = {
         fontFamily: 'system-ui, sans-serif',
         width: 220, outline: 'none',
     },
+    historyBlock: {
+        display: 'flex' as const, flexDirection: 'column' as const,
+        gap: 6, marginTop: 20, width: 260,
+    },
+    historyLabel: {
+        fontSize: 10, fontWeight: 700, letterSpacing: 2,
+        opacity: 0.75, textTransform: 'uppercase' as const,
+        textAlign: 'center' as const, marginBottom: 4,
+    },
+    historyRow: {
+        background: 'rgba(0,0,0,0.25)', color: '#FFF8E7',
+        border: '1px solid rgba(255,248,231,0.2)', borderRadius: 8,
+        padding: '8px 12px', fontSize: 13, fontWeight: 600,
+        display: 'flex', justifyContent: 'space-between',
+        alignItems: 'center', gap: 8, cursor: 'pointer',
+        fontFamily: 'system-ui, sans-serif',
+    },
+    historyOpp: {
+        fontWeight: 700, color: '#FFF8E7',
+        whiteSpace: 'nowrap' as const, overflow: 'hidden' as const,
+        textOverflow: 'ellipsis' as const, maxWidth: 100,
+    },
+    historyMeta: {
+        fontSize: 10, opacity: 0.7, fontWeight: 500,
+    },
+    historyScore: {
+        fontWeight: 800, fontSize: 14,
+    },
 };
 
 export function MenuScreen({ onPlaySolo }: Props) {
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [name, setName] = useState(() => displayName() ?? '');
+    const [history, setHistory] = useState<MatchHistoryEntry[]>([]);
     const firstHole = HOLES[0];
+
+    useEffect(() => {
+        let cancelled = false;
+        loadMatchHistory(HOLES.length, 5).then((rows) => {
+            if (!cancelled) setHistory(rows);
+        });
+        return () => { cancelled = true; };
+    }, []);
 
     function handleNameChange(value: string) {
         setName(value);
@@ -109,6 +146,30 @@ export function MenuScreen({ onPlaySolo }: Props) {
                 play solo
             </button>
             {error && <div style={styles.error}>{error}</div>}
+            {history.length > 0 && (
+                <div style={styles.historyBlock}>
+                    <div style={styles.historyLabel}>recent matches</div>
+                    {history.map((row) => (
+                        <div
+                            key={row.matchId}
+                            style={styles.historyRow}
+                            onClick={() => { window.location.href = matchUrl(row.matchId); }}
+                        >
+                            <div>
+                                <div style={styles.historyOpp}>
+                                    vs {row.opponentName ?? 'unknown'}
+                                </div>
+                                <div style={styles.historyMeta}>
+                                    {row.status === 'complete' ? 'final' : `hole ${row.holesPlayed + 1} of ${row.totalHoles}`}
+                                </div>
+                            </div>
+                            <div style={styles.historyScore}>
+                                {row.myTotal} <span style={{ opacity: 0.6 }}>vs</span> {row.opponentTotal}
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            )}
             <div style={styles.footer}>v0.5 · async play via iMessage</div>
         </div>
     );
