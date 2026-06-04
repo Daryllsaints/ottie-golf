@@ -394,23 +394,24 @@ export class GolfScene extends Scene {
         }
     }
 
-    /** Direct camera scroll math — Phaser 4 centerOn doesn't behave
-     *  as expected so we compute the scroll position ourselves to
-     *  put the world center in the viewport center. */
+    /** Force the camera viewport to match the current canvas size, then
+     *  center the world. setSize() is required because the camera's own
+     *  width/height does not auto-sync with the canvas under Scale.RESIZE
+     *  in Phaser 4, which made every center calculation wrong. */
     private applyOverviewCamera() {
         const cam = this.cameras.main;
         cam.removeBounds();
         cam.stopFollow();
+        cam.setSize(this.scale.width, this.scale.height);
         cam.setZoom(this.overviewZoom);
-        cam.setScroll(
-            WORLD_W / 2 - (this.scale.width  / this.overviewZoom) / 2,
-            WORLD_H / 2 - (this.scale.height / this.overviewZoom) / 2,
-        );
+        cam.centerOn(WORLD_W / 2, WORLD_H / 2);
+        this.updateDebugHud();
     }
 
     private zoomToFollow() {
         const cam = this.cameras.main;
         cam.removeBounds();
+        cam.setSize(this.scale.width, this.scale.height);
         cam.zoomTo(1.0, 350, 'Sine.easeInOut');
         cam.startFollow(this.ballSprite, true, 0.1, 0.1);
     }
@@ -419,16 +420,36 @@ export class GolfScene extends Scene {
         const cam = this.cameras.main;
         cam.stopFollow();
         cam.removeBounds();
-        const targetScrollX = WORLD_W / 2 - (this.scale.width  / this.overviewZoom) / 2;
-        const targetScrollY = WORLD_H / 2 - (this.scale.height / this.overviewZoom) / 2;
+        cam.setSize(this.scale.width, this.scale.height);
         cam.zoomTo(this.overviewZoom, 400, 'Sine.easeInOut');
-        this.tweens.add({
-            targets: cam,
-            scrollX: targetScrollX,
-            scrollY: targetScrollY,
-            duration: 400,
-            ease: 'Sine.easeInOut',
-        });
+        cam.pan(WORLD_W / 2, WORLD_H / 2, 400, 'Sine.easeInOut');
+    }
+
+    /** Tiny top-right overlay so we can see what the camera actually
+     *  thinks its size is. Only renders when ?debug=1 is in the URL. */
+    private debugHud?: Phaser.GameObjects.Text;
+    private updateDebugHud() {
+        if (typeof window === 'undefined') return;
+        if (!new URLSearchParams(window.location.search).has('debug')) return;
+        const cam = this.cameras.main;
+        const txt = [
+            `scale ${this.scale.width.toFixed(0)}x${this.scale.height.toFixed(0)}`,
+            `cam   ${cam.width.toFixed(0)}x${cam.height.toFixed(0)}`,
+            `zoom  ${cam.zoom.toFixed(3)}`,
+            `scrl  ${cam.scrollX.toFixed(1)},${cam.scrollY.toFixed(1)}`,
+            `world ${WORLD_W}x${WORLD_H}`,
+        ].join('\n');
+        if (!this.debugHud) {
+            this.debugHud = this.add.text(this.scale.width - 8, 8, txt, {
+                fontFamily: 'monospace', fontSize: '11px',
+                color: '#ffffff', backgroundColor: '#000000aa',
+                padding: { left: 6, right: 6, top: 4, bottom: 4 },
+                align: 'right',
+            }).setOrigin(1, 0).setScrollFactor(0).setDepth(2000);
+        } else {
+            this.debugHud.setText(txt);
+            this.debugHud.setPosition(this.scale.width - 8, 8);
+        }
     }
 
     private placeOttie() {
