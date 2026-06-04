@@ -24,6 +24,15 @@ export const COLORS = {
   verdictPar:     0x3A2814,
   verdictBogey:   0xC18B3A,
   verdictWorse:   0xC8543A,
+  // Clean flat-fill colors used for bulk terrain rendering. Wang
+  // tilesets only kick in at boundaries; interior cells use these
+  // solid colors so the play area reads as a clear shaped course
+  // instead of busy tile noise.
+  fillOcean:      0x3a87b8,   // deep blue water
+  fillRough:      0x4d8a3d,   // darker rough green
+  fillFairway:    0x77c049,   // brighter fairway green
+  fillSand:       0xe8c97e,   // warm sand
+  fillGreen:      0xa6d978,   // pale putting green
 } as const
 
 export const COURSE = {
@@ -100,8 +109,10 @@ export const SWING = {
   hitRadiusPx: 48,
   maxDragPx: 200,
   minDragPx: 12,
-  maxSpeed: 14,
-  restSpeedThreshold: 0.12,
+  // Bumped from 14 for the new 960×2560 world so a clean drive
+  // covers ~150 yds of fairway. A par-4 is now reachable in 3-4 shots.
+  maxSpeed: 26,
+  restSpeedThreshold: 0.18,
 
   // Power accuracy zone: release the drag with the pull magnitude
   // inside this band for a clean 100%-power strike.

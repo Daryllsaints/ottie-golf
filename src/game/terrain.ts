@@ -1,29 +1,22 @@
-// Terrain types + procedural course layout for Hole 1.
-//
-// The world is a grid of vertices. Each vertex carries a terrain
-// type. Each grid CELL renders by sampling the 4 surrounding vertices
-// and looking up the right Wang tile per layer:
-//   Layer 1 (ocean/grass): base. Renders for every cell.
-//   Layer 2 (grass/sand):  on top of grass cells with sand corners.
-//   Layer 3 (grass/green): on top of grass cells with green corners.
-//
-// Terrain at vertex (row=0, col=0) is top-left of the world.
+// Terrain layout for Hole 1. The world is wider than the prior
+// version with more land + less ocean, and a properly-shaped fairway
+// running vertically with a clean rough border.
 
-export type Terrain = 'ocean' | 'grass' | 'sand' | 'green';
+export type Terrain = 'ocean' | 'rough' | 'fairway' | 'sand' | 'green';
 
-// World dimensions. ~640x2560 = par-4 scale, room to scroll vertically.
 export const TILE_PX = 32;
-export const GRID_COLS = 20;     // 640px wide
-export const GRID_ROWS = 80;     // 2560px tall
+export const GRID_COLS = 30;
+export const GRID_ROWS = 80;
+export const WORLD_W = GRID_COLS * TILE_PX;   // 960
+export const WORLD_H = GRID_ROWS * TILE_PX;   // 2560
 
-export const WORLD_W = GRID_COLS * TILE_PX;
-export const WORLD_H = GRID_ROWS * TILE_PX;
+// Approximate visual scale: ~6.4 pixels per yard, so a 2048px tee-to-pin
+// distance reads as ~320 yds. Tuned by feel against the reference PPG par-4 screenshots.
+export const PX_PER_YARD = 6.4;
 
-// Vertex grid is (GRID_COLS+1) x (GRID_ROWS+1). Tee at bottom, hole at top.
-export const TEE_VERTEX  = { col: 10, row: GRID_ROWS - 6 };
-export const HOLE_VERTEX = { col: 11, row: 10 };
+export const TEE_VERTEX  = { col: 15, row: GRID_ROWS - 8 };
+export const HOLE_VERTEX = { col: 16, row: 8 };
 
-// Convert a vertex grid coord to world pixels.
 export function vertexToWorld(col: number, row: number): { x: number; y: number } {
     return { x: col * TILE_PX, y: row * TILE_PX };
 }
@@ -31,36 +24,38 @@ export function vertexToWorld(col: number, row: number): { x: number; y: number 
 export const TEE_WORLD  = vertexToWorld(TEE_VERTEX.col,  TEE_VERTEX.row);
 export const HOLE_WORLD = vertexToWorld(HOLE_VERTEX.col, HOLE_VERTEX.row);
 
-// Procedural terrain layout: fairway runs vertically with a slight
-// curve, water (ocean) flanks both sides, putting green is a circular
-// blob around the cup, sand bunker sits just left of the green.
+// Terrain rules:
+//   Ocean: outside the rough silhouette
+//   Rough: thin band framing the fairway
+//   Fairway: the main playable corridor (wide vertical band with slight S-curve)
+//   Sand:  blob just left of the green approach
+//   Green: oval around the cup
 export function terrainAt(col: number, row: number): Terrain {
-    // Sand bunker: a circular blob to the left of and approaching the green.
-    const sandCenter = { col: 7, row: 16 };
-    const distSand = Math.hypot(col - sandCenter.col, row - sandCenter.row);
+    // Sand bunker: blob to the left of the approach to the green
+    const sandCenter = { col: 12, row: 14 };
+    const distSand = Math.hypot((col - sandCenter.col) / 1.0, (row - sandCenter.row) / 0.8);
     if (distSand < 2.8) return 'sand';
 
-    // Putting green: oval around the cup.
+    // Putting green: oval around the cup
     const distGreen = Math.hypot(
         (col - HOLE_VERTEX.col) / 1.0,
         (row - HOLE_VERTEX.row) / 1.2,
     );
-    if (distGreen < 4.0) return 'green';
+    if (distGreen < 4.2) return 'green';
 
-    // Fairway: column band with a slight S-curve.
-    const fairwayCenter = 10 + Math.sin(row * 0.07) * 2.5;
-    // Narrow approaching the green, wide off the tee.
-    let fairwayHalf = 4.5;
-    if (row < 20) fairwayHalf = 3.0;          // near green
-    else if (row > GRID_ROWS - 10) fairwayHalf = 5.5; // tee box
+    // Fairway center column with a slight S-curve
+    const fairwayCenter = 15 + Math.sin(row * 0.06) * 2.5;
+    // Narrows near the green, widens at the tee box
+    let fairwayHalf = 5.5;
+    if (row < 18) fairwayHalf = 3.5;                 // narrow approach to green
+    else if (row > GRID_ROWS - 12) fairwayHalf = 6.5; // wide tee box
 
-    if (Math.abs(col - fairwayCenter) < fairwayHalf) return 'grass';
-
+    const fromCenter = Math.abs(col - fairwayCenter);
+    if (fromCenter < fairwayHalf) return 'fairway';
+    if (fromCenter < fairwayHalf + 2.5) return 'rough';
     return 'ocean';
 }
 
-// Precomputed vertex grid for the entire world. Built once at boot
-// so render calls are O(1) lookups.
 export type TerrainGrid = Terrain[][];
 
 export function buildTerrainGrid(): TerrainGrid {
@@ -75,8 +70,6 @@ export function buildTerrainGrid(): TerrainGrid {
     return grid;
 }
 
-// Vertex pattern at a CELL — encodes the 4 corner terrains as a string
-// like 'grass,grass,sand,grass' so a tileset can be looked up by pattern.
 export function cornerPattern(grid: TerrainGrid, cellCol: number, cellRow: number): [Terrain, Terrain, Terrain, Terrain] {
     const tl = grid[cellRow]   [cellCol];
     const tr = grid[cellRow]   [cellCol + 1];
@@ -85,25 +78,36 @@ export function cornerPattern(grid: TerrainGrid, cellCol: number, cellRow: numbe
     return [tl, tr, br, bl];
 }
 
-// Tree decorations — clustered along the rough edges to form a treeline.
-// Returns world-space positions where a tree sprite should render.
+/** True if all four corners share the same terrain type. */
+export function allSame(corners: [Terrain, Terrain, Terrain, Terrain]): Terrain | null {
+    const [a, b, c, d] = corners;
+    return (a === b && b === c && c === d) ? a : null;
+}
+
+/** True if any corner is the given terrain type. */
+export function anyIs(corners: [Terrain, Terrain, Terrain, Terrain], t: Terrain): boolean {
+    return corners[0] === t || corners[1] === t || corners[2] === t || corners[3] === t;
+}
+
+/** Tree decoration positions — sit just inside the ocean side of the
+ *  rough/ocean boundary so they form a clean treeline framing the
+ *  course without invading the fairway. Deterministic so the line
+ *  doesn't reshuffle on rerender. */
 export function generateTreePositions(grid: TerrainGrid): Array<{ x: number; y: number }> {
     const out: Array<{ x: number; y: number }> = [];
-    // For each cell, if it's GRASS but has at least one OCEAN neighbor
-    // among its corners, drop a tree on the grass side with some
-    // pseudo-random jitter so the treeline reads as natural.
     for (let row = 0; row < GRID_ROWS; row++) {
         for (let col = 0; col < GRID_COLS; col++) {
-            const [tl, tr, br, bl] = cornerPattern(grid, col, row);
-            const corners = [tl, tr, br, bl];
-            const hasOcean = corners.includes('ocean');
-            const hasGrass = corners.includes('grass');
-            if (!hasOcean || !hasGrass) continue;
-            // Deterministic pseudo-random so the treeline doesn't reshuffle.
+            const corners = cornerPattern(grid, col, row);
+            const hasOcean = anyIs(corners, 'ocean');
+            const hasGround = anyIs(corners, 'rough') || anyIs(corners, 'fairway');
+            if (!hasOcean || !hasGround) continue;
+            // Tree only if THIS cell is itself ocean-ish (sits on the water side of the boundary).
+            const here = grid[row][col];
+            if (here !== 'ocean') continue;
             const seed = (col * 73 + row * 191) % 100;
-            if (seed > 55) continue; // ~55% chance of a tree on the edge
-            const jx = ((seed * 13) % 17) - 8;
-            const jy = ((seed * 7)  % 17) - 8;
+            if (seed > 38) continue; // ~38% density along the shore
+            const jx = ((seed * 13) % 9) - 4;
+            const jy = ((seed * 7)  % 9) - 4;
             out.push({
                 x: col * TILE_PX + TILE_PX / 2 + jx,
                 y: row * TILE_PX + TILE_PX / 2 + jy,

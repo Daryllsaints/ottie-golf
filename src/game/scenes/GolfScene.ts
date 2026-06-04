@@ -7,9 +7,9 @@ import { Scene } from 'phaser';
 import { SWING, BALL_PHYSICS, HOLE_1_PAR, COLORS, COURSE } from '../constants';
 import { EventBus } from '../EventBus';
 import {
-    Terrain, TILE_PX, GRID_COLS, GRID_ROWS, WORLD_W, WORLD_H,
+    Terrain, TILE_PX, GRID_COLS, GRID_ROWS, WORLD_W, WORLD_H, PX_PER_YARD,
     TEE_WORLD, HOLE_WORLD,
-    buildTerrainGrid, cornerPattern, generateTreePositions,
+    buildTerrainGrid, cornerPattern, allSame, anyIs, generateTreePositions,
 } from '../terrain';
 
 type SwingState = 'IDLE' | 'AIMING' | 'IN_FLIGHT';
@@ -200,29 +200,64 @@ export class GolfScene extends Scene {
     // ─── Course render ────────────────────────────────────────────
 
     private drawCourse() {
+        // Base layer: flat ocean across the entire world. Everything
+        // else paints over it. Avoids the Wang tiles being misused as
+        // bulk fill (which produced the chaotic checker pattern).
+        this.add.rectangle(WORLD_W / 2, WORLD_H / 2, WORLD_W, WORLD_H, COLORS.fillOcean, 1).setDepth(-2);
+
+        // Per cell: clean flat fills for interior areas, Wang tiles only at
+        // terrain boundaries where they actually look natural.
         for (let row = 0; row < GRID_ROWS; row++) {
             for (let col = 0; col < GRID_COLS; col++) {
-                const [tl, tr, br, bl] = cornerPattern(this.grid, col, row);
+                const corners = cornerPattern(this.grid, col, row);
                 const cx = col * TILE_PX + TILE_PX / 2;
                 const cy = row * TILE_PX + TILE_PX / 2;
 
-                // Layer 1 — ocean (lower) → grass (upper). Renders for every cell.
-                const t1 = (t: Terrain): 'lower' | 'upper' => t === 'ocean' ? 'lower' : 'upper';
-                const frame1 = this.pickFrame(this.wangOceanGrass, t1(tl), t1(tr), t1(br), t1(bl));
-                this.add.image(cx, cy, TEX.oceanGrass, frame1).setDepth(0);
+                const same = allSame(corners);
 
-                // Layer 2 — grass (lower) → sand (upper). Skip cells with no sand corners.
-                if (tl === 'sand' || tr === 'sand' || br === 'sand' || bl === 'sand') {
-                    const t2 = (t: Terrain): 'lower' | 'upper' => t === 'sand' ? 'upper' : 'lower';
-                    const frame2 = this.pickFrame(this.wangGrassSand, t2(tl), t2(tr), t2(br), t2(bl));
-                    this.add.image(cx, cy, TEX.grassSand, frame2).setDepth(1);
+                // ── LAYER 1: ocean/grass-family boundary ──
+                if (same === 'ocean') {
+                    // Pure ocean cell — flat blue base already covers; skip.
+                } else if (same !== null) {
+                    // All 4 corners are the same NON-ocean terrain. Fill the cell
+                    // with a clean grass-family color (rough/fairway/sand/green all
+                    // get rendered by their own layers below — here we just paint
+                    // a clean rough as the land base).
+                    this.add.rectangle(cx, cy, TILE_PX, TILE_PX, COLORS.fillRough, 1).setDepth(0);
+                } else {
+                    // Mixed corners → use the ocean→grass Wang tile so the
+                    // shoreline reads as a natural sandy edge.
+                    const t1 = (t: Terrain): 'lower' | 'upper' => t === 'ocean' ? 'lower' : 'upper';
+                    const frame = this.pickFrame(this.wangOceanGrass, t1(corners[0]), t1(corners[1]), t1(corners[2]), t1(corners[3]));
+                    this.add.image(cx, cy, TEX.oceanGrass, frame).setDepth(0);
                 }
 
-                // Layer 3 — grass (lower) → green (upper). Skip cells with no green corners.
-                if (tl === 'green' || tr === 'green' || br === 'green' || bl === 'green') {
-                    const t3 = (t: Terrain): 'lower' | 'upper' => t === 'green' ? 'upper' : 'lower';
-                    const frame3 = this.pickFrame(this.wangGrassGreen, t3(tl), t3(tr), t3(br), t3(bl));
-                    this.add.image(cx, cy, TEX.grassGreen, frame3).setDepth(2);
+                // ── LAYER 2: rough → fairway. Flat fill where all corners are
+                //          fairway, no transition tile needed (clean color shift). ──
+                if (allSame(corners) === 'fairway') {
+                    this.add.rectangle(cx, cy, TILE_PX, TILE_PX, COLORS.fillFairway, 1).setDepth(1);
+                } else if (anyIs(corners, 'fairway') && !anyIs(corners, 'ocean')) {
+                    // Rough/fairway boundary cell — paint a translucent fairway
+                    // edge so the corridor reads as a soft shape against rough.
+                    this.add.rectangle(cx, cy, TILE_PX, TILE_PX, COLORS.fillFairway, 0.55).setDepth(1);
+                }
+
+                // ── LAYER 3: sand bunker ──
+                if (allSame(corners) === 'sand') {
+                    this.add.rectangle(cx, cy, TILE_PX, TILE_PX, COLORS.fillSand, 1).setDepth(2);
+                } else if (anyIs(corners, 'sand')) {
+                    const t = (x: Terrain): 'lower' | 'upper' => x === 'sand' ? 'upper' : 'lower';
+                    const frame = this.pickFrame(this.wangGrassSand, t(corners[0]), t(corners[1]), t(corners[2]), t(corners[3]));
+                    this.add.image(cx, cy, TEX.grassSand, frame).setDepth(2);
+                }
+
+                // ── LAYER 4: putting green ──
+                if (allSame(corners) === 'green') {
+                    this.add.rectangle(cx, cy, TILE_PX, TILE_PX, COLORS.fillGreen, 1).setDepth(3);
+                } else if (anyIs(corners, 'green')) {
+                    const t = (x: Terrain): 'lower' | 'upper' => x === 'green' ? 'upper' : 'lower';
+                    const frame = this.pickFrame(this.wangGrassGreen, t(corners[0]), t(corners[1]), t(corners[2]), t(corners[3]));
+                    this.add.image(cx, cy, TEX.grassGreen, frame).setDepth(3);
                 }
             }
         }
@@ -567,9 +602,10 @@ export class GolfScene extends Scene {
     }
 
     private computeDistanceToPin(): number {
-        return Math.round(Math.hypot(
+        const px = Math.hypot(
             this.ballBody.position.x - HOLE_WORLD.x,
             this.ballBody.position.y - HOLE_WORLD.y,
-        ));
+        );
+        return Math.round(px / PX_PER_YARD);
     }
 }
