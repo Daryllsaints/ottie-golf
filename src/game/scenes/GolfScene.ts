@@ -29,18 +29,20 @@ type WangSet = {
 };
 
 const TEX = {
-    oceanGrass: 'ts-ocean-grass',
-    grassSand:  'ts-grass-sand',
-    grassGreen: 'ts-grass-green',
-    tree:       'tree',
-    ottie:      'ottie-ready',
-    ottieSwing: 'ottie-swing',
+    oceanRough:    'ts-ocean-rough',
+    roughFairway:  'ts-rough-fairway',
+    fairwaySand:   'ts-fairway-sand',
+    fairwayGreen:  'ts-fairway-green',
+    tree:          'tree',
+    ottie:         'ottie-ready',
+    ottieSwing:    'ottie-swing',
 } as const;
 
 const JSON_KEY = {
-    oceanGrass: 'jsts-ocean-grass',
-    grassSand:  'jsts-grass-sand',
-    grassGreen: 'jsts-grass-green',
+    oceanRough:    'jsts-ocean-rough',
+    roughFairway:  'jsts-rough-fairway',
+    fairwaySand:   'jsts-fairway-sand',
+    fairwayGreen:  'jsts-fairway-green',
 } as const;
 
 export class GolfScene extends Scene {
@@ -62,9 +64,10 @@ export class GolfScene extends Scene {
     private oobIndicatorHideAt = 0;
     private sinkOverlay?: Phaser.GameObjects.Container;
     private grid!: Terrain[][];
-    private wangOceanGrass!: WangSet;
-    private wangGrassSand!:  WangSet;
-    private wangGrassGreen!: WangSet;
+    private wangOceanRough!:   WangSet;
+    private wangRoughFairway!: WangSet;
+    private wangFairwaySand!:  WangSet;
+    private wangFairwayGreen!: WangSet;
     private aimHintGfx!: Phaser.GameObjects.Graphics;
     private flagSprite?: Phaser.GameObjects.Graphics;
     private overviewZoom = 1.0;
@@ -77,13 +80,17 @@ export class GolfScene extends Scene {
     constructor() { super('GolfScene'); }
 
     preload() {
-        // Wang tileset PNGs + metadata JSONs
-        this.load.image(TEX.oceanGrass, '/tiles/ocean-grass.png');
-        this.load.image(TEX.grassSand,  '/tiles/grass-sand.png');
-        this.load.image(TEX.grassGreen, '/tiles/grass-green.png');
-        this.load.json(JSON_KEY.oceanGrass, '/tiles/ocean-grass.json');
-        this.load.json(JSON_KEY.grassSand,  '/tiles/grass-sand.json');
-        this.load.json(JSON_KEY.grassGreen, '/tiles/grass-green.json');
+        // Wang tileset PNGs + metadata JSONs. The ocean-grass file is
+        // the ocean->rough boundary tileset (kept the legacy filename
+        // since it ships against an existing path).
+        this.load.image(TEX.oceanRough,   '/tiles/ocean-grass.png');
+        this.load.image(TEX.roughFairway, '/tiles/rough-fairway.png');
+        this.load.image(TEX.fairwaySand,  '/tiles/fairway-sand.png');
+        this.load.image(TEX.fairwayGreen, '/tiles/fairway-green.png');
+        this.load.json(JSON_KEY.oceanRough,   '/tiles/ocean-grass.json');
+        this.load.json(JSON_KEY.roughFairway, '/tiles/rough-fairway.json');
+        this.load.json(JSON_KEY.fairwaySand,  '/tiles/fairway-sand.json');
+        this.load.json(JSON_KEY.fairwayGreen, '/tiles/fairway-green.json');
         // Sprites
         this.load.image(TEX.tree,       '/sprites/tree.png');
         this.load.image(TEX.ottie,      '/sprites/ottie-ready.png');
@@ -99,9 +106,10 @@ export class GolfScene extends Scene {
         this.matter.world.setBounds(0, 0, WORLD_W, WORLD_H);
 
         // Register Wang tileset frames + build pattern lookups
-        this.wangOceanGrass = this.buildWangSet(TEX.oceanGrass, JSON_KEY.oceanGrass);
-        this.wangGrassSand  = this.buildWangSet(TEX.grassSand,  JSON_KEY.grassSand);
-        this.wangGrassGreen = this.buildWangSet(TEX.grassGreen, JSON_KEY.grassGreen);
+        this.wangOceanRough   = this.buildWangSet(TEX.oceanRough,   JSON_KEY.oceanRough);
+        this.wangRoughFairway = this.buildWangSet(TEX.roughFairway, JSON_KEY.roughFairway);
+        this.wangFairwaySand  = this.buildWangSet(TEX.fairwaySand,  JSON_KEY.fairwaySand);
+        this.wangFairwayGreen = this.buildWangSet(TEX.fairwayGreen, JSON_KEY.fairwayGreen);
 
         // Build terrain grid + render the course
         this.grid = buildTerrainGrid();
@@ -264,59 +272,67 @@ export class GolfScene extends Scene {
         // bulk fill (which produced the chaotic checker pattern).
         this.add.rectangle(WORLD_W / 2, WORLD_H / 2, WORLD_W, WORLD_H, COLORS.fillOcean, 1).setDepth(-2);
 
-        // Per cell: clean flat fills for interior areas, Wang tiles only at
-        // terrain boundaries where they actually look natural.
+        // Each cell is composited from up to 4 boundary layers, painted
+        // in order: ocean->rough, rough->fairway, fairway->sand,
+        // fairway->green. Inside pure regions we just paint a flat
+        // color; at boundaries we use the appropriate Wang tile.
         for (let row = 0; row < GRID_ROWS; row++) {
             for (let col = 0; col < GRID_COLS; col++) {
                 const corners = cornerPattern(this.grid, col, row);
                 const cx = col * TILE_PX + TILE_PX / 2;
                 const cy = row * TILE_PX + TILE_PX / 2;
 
-                const same = allSame(corners);
+                const same       = allSame(corners);
+                const hasOcean   = anyIs(corners, 'ocean');
+                const hasRough   = anyIs(corners, 'rough');
+                const hasFairway = anyIs(corners, 'fairway');
+                const hasSand    = anyIs(corners, 'sand');
+                const hasGreen   = anyIs(corners, 'green');
 
-                // ── LAYER 1: ocean/grass-family boundary ──
+                // LAYER 0: ocean->rough shoreline, or flat rough base.
                 if (same === 'ocean') {
-                    // Pure ocean cell, flat blue base already covers; skip.
-                } else if (same !== null) {
-                    // All 4 corners are the same NON-ocean terrain. Fill the cell
-                    // with a clean grass-family color (rough/fairway/sand/green all
-                    // get rendered by their own layers below; here we just paint
-                    // a clean rough as the land base).
-                    this.add.rectangle(cx, cy, TILE_PX, TILE_PX, COLORS.fillRough, 1).setDepth(0);
+                    // pure ocean; flat base already covers
+                } else if (hasOcean) {
+                    const t = (x: Terrain): 'lower' | 'upper' => x === 'ocean' ? 'lower' : 'upper';
+                    const frame = this.pickFrame(this.wangOceanRough, t(corners[0]), t(corners[1]), t(corners[2]), t(corners[3]));
+                    this.add.image(cx, cy, TEX.oceanRough, frame).setDepth(0);
                 } else {
-                    // Mixed corners → use the ocean→grass Wang tile so the
-                    // shoreline reads as a natural sandy edge.
-                    const t1 = (t: Terrain): 'lower' | 'upper' => t === 'ocean' ? 'lower' : 'upper';
-                    const frame = this.pickFrame(this.wangOceanGrass, t1(corners[0]), t1(corners[1]), t1(corners[2]), t1(corners[3]));
-                    this.add.image(cx, cy, TEX.oceanGrass, frame).setDepth(0);
+                    // Pure land cell. Paint rough as the land base; brighter
+                    // surfaces (fairway/sand/green) overlay below.
+                    this.add.rectangle(cx, cy, TILE_PX, TILE_PX, COLORS.fillRough, 1).setDepth(0);
                 }
 
-                // ── LAYER 2: rough → fairway. Flat fill where all corners are
-                //          fairway, no transition tile needed (clean color shift). ──
-                if (allSame(corners) === 'fairway') {
-                    this.add.rectangle(cx, cy, TILE_PX, TILE_PX, COLORS.fillFairway, 1).setDepth(1);
-                } else if (anyIs(corners, 'fairway') && !anyIs(corners, 'ocean')) {
-                    // Rough/fairway boundary cell: paint a translucent fairway
-                    // edge so the corridor reads as a soft shape against rough.
-                    this.add.rectangle(cx, cy, TILE_PX, TILE_PX, COLORS.fillFairway, 0.55).setDepth(1);
+                // LAYER 1: rough->fairway boundary or flat fairway fill.
+                if (hasFairway && !hasOcean) {
+                    if (same === 'fairway') {
+                        this.add.rectangle(cx, cy, TILE_PX, TILE_PX, COLORS.fillFairway, 1).setDepth(1);
+                    } else if (hasRough) {
+                        const t = (x: Terrain): 'lower' | 'upper' => x === 'fairway' ? 'upper' : 'lower';
+                        const frame = this.pickFrame(this.wangRoughFairway, t(corners[0]), t(corners[1]), t(corners[2]), t(corners[3]));
+                        this.add.image(cx, cy, TEX.roughFairway, frame).setDepth(1);
+                    } else {
+                        // fairway only mixed with sand/green; paint flat
+                        // fairway under those overlays.
+                        this.add.rectangle(cx, cy, TILE_PX, TILE_PX, COLORS.fillFairway, 1).setDepth(1);
+                    }
                 }
 
-                // ── LAYER 3: sand bunker ──
-                if (allSame(corners) === 'sand') {
+                // LAYER 2: sand bunker boundary (sand sits on fairway).
+                if (same === 'sand') {
                     this.add.rectangle(cx, cy, TILE_PX, TILE_PX, COLORS.fillSand, 1).setDepth(2);
-                } else if (anyIs(corners, 'sand')) {
+                } else if (hasSand) {
                     const t = (x: Terrain): 'lower' | 'upper' => x === 'sand' ? 'upper' : 'lower';
-                    const frame = this.pickFrame(this.wangGrassSand, t(corners[0]), t(corners[1]), t(corners[2]), t(corners[3]));
-                    this.add.image(cx, cy, TEX.grassSand, frame).setDepth(2);
+                    const frame = this.pickFrame(this.wangFairwaySand, t(corners[0]), t(corners[1]), t(corners[2]), t(corners[3]));
+                    this.add.image(cx, cy, TEX.fairwaySand, frame).setDepth(2);
                 }
 
-                // ── LAYER 4: putting green ──
-                if (allSame(corners) === 'green') {
+                // LAYER 3: putting green boundary (green sits on fairway).
+                if (same === 'green') {
                     this.add.rectangle(cx, cy, TILE_PX, TILE_PX, COLORS.fillGreen, 1).setDepth(3);
-                } else if (anyIs(corners, 'green')) {
+                } else if (hasGreen) {
                     const t = (x: Terrain): 'lower' | 'upper' => x === 'green' ? 'upper' : 'lower';
-                    const frame = this.pickFrame(this.wangGrassGreen, t(corners[0]), t(corners[1]), t(corners[2]), t(corners[3]));
-                    this.add.image(cx, cy, TEX.grassGreen, frame).setDepth(3);
+                    const frame = this.pickFrame(this.wangFairwayGreen, t(corners[0]), t(corners[1]), t(corners[2]), t(corners[3]));
+                    this.add.image(cx, cy, TEX.fairwayGreen, frame).setDepth(3);
                 }
             }
         }
