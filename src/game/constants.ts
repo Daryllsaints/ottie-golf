@@ -120,21 +120,19 @@ export const SWING = {
 
   // Power accuracy zone: release the drag with the pull magnitude
   // inside this band for a clean 100%-power strike.
-  // Widened from 75-90% (15% band) → 70-92% (22% band) so the
-  // sweet spot is more forgiving without removing the skill check.
-  sweetSpotMin: 0.70,
-  sweetSpotMax: 0.92,
-  // Over-pull penalty also softened — was 0.65 / ±8°.
-  overpowerPenalty: 0.75,
-  overpowerJitterDeg: 5,
+  sweetSpotMin: 0.65,
+  sweetSpotMax: 0.95,
+  // Over-pull penalty softened: smaller speed loss + much smaller
+  // jitter so the player gets a usable shot instead of a hard mishit.
+  overpowerPenalty: 0.82,
+  overpowerJitterDeg: 2.5,
 
-  // Hold penalty grace period extended (was 800ms) and drift rate
-  // halved (was 12°/sec) so casual hesitation is less punishing.
-  // Hard ceiling on drift dropped too.
-  holdGraceMs: 1200,
-  holdDriftRateDegPerSec: 8,
-  holdDriftMaxDeg: 14,
-  holdOscHz: 1.6,
+  // Hold-to-aim feels lighter now: longer grace before drift starts,
+  // slower drift rate, lower oscillation amplitude / frequency.
+  holdGraceMs: 1800,
+  holdDriftRateDegPerSec: 4,
+  holdDriftMaxDeg: 8,
+  holdOscHz: 1.0,
 } as const
 
 export const BALL_PHYSICS = {
