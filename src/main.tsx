@@ -8,21 +8,20 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
     </React.StrictMode>,
 )
 
-// Register the PWA service worker. Lets the game open offline on
-// repeat visits and earns the install-to-home-screen prompt on iOS
-// and Android. Production-only so the dev experience stays uncached.
-if ('serviceWorker' in navigator && import.meta.env.PROD) {
-    window.addEventListener('load', () => {
-        navigator.serviceWorker.register('/sw.js').catch((err) => {
-            console.warn('[sw] registration failed', err);
-        });
-    });
-    // When a new SW takes control (after a deploy), reload once so the
-    // page picks up the fresh assets instead of serving the stale shell.
-    let refreshing = false;
-    navigator.serviceWorker.addEventListener('controllerchange', () => {
-        if (refreshing) return;
-        refreshing = true;
-        window.location.reload();
-    });
+// Service worker temporarily disabled while we investigate a black
+// screen on the solo route. Unregister any previously-installed SW
+// on this device so users with a stale cached app shell self-heal
+// on next visit.
+if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.getRegistrations()
+        .then((regs) => Promise.all(regs.map((r) => r.unregister())))
+        .then((unregistered) => {
+            if (unregistered.some(Boolean)) {
+                // Once the old SW is gone, drop its caches too.
+                if ('caches' in window) {
+                    caches.keys().then((keys) => keys.forEach((k) => caches.delete(k)));
+                }
+            }
+        })
+        .catch((err) => console.warn('[sw] cleanup failed', err));
 }
