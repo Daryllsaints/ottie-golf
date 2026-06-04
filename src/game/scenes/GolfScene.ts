@@ -80,6 +80,7 @@ export class GolfScene extends Scene {
     private tutSwingTween?: Phaser.Tweens.Tween;
     private firstShotTaken = false;
     private armedHeckleLevel = 0;
+    private waterHazardsThisHole = 0;
 
     constructor() { super('GolfScene'); }
 
@@ -220,7 +221,13 @@ export class GolfScene extends Scene {
 
     private handleWaterHazard() {
         this.matter.body.setPosition(this.ballBody as unknown as MatterJS.BodyType, { x: TEE_WORLD.x, y: TEE_WORLD.y }, false);
-        this.strokes += 1;
+        // Soft mulligan: first water-hazard per hole is free, framed
+        // as a learning beat rather than a punishment. Subsequent ones
+        // cost a stroke as normal.
+        const isMulligan = this.waterHazardsThisHole === 0;
+        this.waterHazardsThisHole += 1;
+        if (!isMulligan) this.strokes += 1;
+        this.haptic(isMulligan ? [40] : [80, 40, 40]);
         this.state = 'IDLE';
         this.ottie.setTexture(TEX.ottie);
         this.trail = [];
@@ -232,11 +239,13 @@ export class GolfScene extends Scene {
         EventBus.emit('distance-to-pin', this.computeDistanceToPin());
 
         this.oobIndicator?.destroy();
+        const label = isMulligan ? 'splash · mulligan, no penalty' : 'splash · +1';
+        const bg = isMulligan ? '#4A9D5D' : '#3a87b8';
         this.oobIndicator = this.add.text(
             this.scale.width / 2, 60,
-            'splash · +1', {
+            label, {
                 fontFamily: 'system-ui, sans-serif', fontSize: '16px',
-                color: '#FFF8E7', backgroundColor: '#3a87b8',
+                color: '#FFF8E7', backgroundColor: bg,
                 padding: { x: 12, y: 6 },
             },
         ).setOrigin(0.5).setScrollFactor(0).setDepth(900);
@@ -425,6 +434,16 @@ export class GolfScene extends Scene {
             this.aimHintGfx.moveTo(x1, y1);
             this.aimHintGfx.lineTo(x2, y2);
             this.aimHintGfx.strokePath();
+        }
+    }
+
+    /** Fire a vibration pattern where the device supports it. iOS
+     *  Safari currently ignores navigator.vibrate (the API exists but
+     *  is a no-op), Android Chrome respects it; we call it
+     *  unconditionally and let the platform decide. */
+    private haptic(pattern: number[]) {
+        if (typeof navigator !== 'undefined' && navigator.vibrate) {
+            navigator.vibrate(pattern);
         }
     }
 
@@ -817,6 +836,7 @@ export class GolfScene extends Scene {
 
         this.state = 'IN_FLIGHT';
         this.strokes += 1;
+        this.haptic([18]);
         EventBus.emit('strokes-changed', this.strokes);
         this.stopOttieIdleBob();
         this.ottie.setTexture(TEX.ottieSwing);
@@ -898,11 +918,9 @@ export class GolfScene extends Scene {
 
     private sinkBall() {
         this.holeSunk = true;
-        EventBus.emit('ball-sunk', this.strokes);
+        this.haptic([30, 50, 30, 50, 60]);
         this.matter.body.setVelocity(this.ballBody as unknown as MatterJS.BodyType, { x: 0, y: 0 });
         this.matter.body.setPosition(this.ballBody as unknown as MatterJS.BodyType, { x: HOLE_WORLD.x, y: HOLE_WORLD.y }, false);
-        this.ballSprite.setVisible(false);
-        this.ballShadow.setVisible(false);
         this.trail = [];
         this.trailGfx.clear();
         this.ottie.setTexture(TEX.ottie);
@@ -927,7 +945,79 @@ export class GolfScene extends Scene {
             diff === 1  ? 'kay…'   :
                           '…kay';
 
-        this.showSinkOverlay(verdict, verdictColor, subtitle);
+        // Cup-rattle beat: tiny bounce of the ball inside the cup, then
+        // it disappears. Gives the sink its 'ohhhh' moment instead of
+        // jumping straight to the overlay.
+        this.tweens.add({
+            targets: this.ballSprite,
+            scale: { from: 1, to: 0.4 },
+            x: HOLE_WORLD.x,
+            y: HOLE_WORLD.y,
+            duration: 280,
+            ease: 'Quad.easeOut',
+            onComplete: () => {
+                this.ballSprite.setVisible(false);
+                this.ballShadow.setVisible(false);
+            },
+        });
+
+        // Variable celebration. Eagle gets confetti + ottie spin;
+        // birdie gets a small particle ring; par gets a calm dust puff;
+        // worse gets nothing.
+        this.playSinkCelebration(diff);
+
+        // Wait for the rattle before opening the React ShareCard so
+        // the celebration plays in clear air.
+        this.time.delayedCall(480, () => {
+            EventBus.emit('ball-sunk', this.strokes);
+            this.showSinkOverlay(verdict, verdictColor, subtitle);
+        });
+    }
+
+    private playSinkCelebration(diff: number) {
+        const cx = HOLE_WORLD.x;
+        const cy = HOLE_WORLD.y;
+
+        if (diff <= -2) {
+            // Eagle: confetti burst + ottie spin
+            this.spawnConfetti(cx, cy, 26, 1.0);
+            this.tweens.add({
+                targets: this.ottie,
+                angle: { from: 0, to: 360 },
+                duration: 700,
+                ease: 'Cubic.easeOut',
+                onComplete: () => this.ottie.setAngle(0),
+            });
+        } else if (diff === -1) {
+            // Birdie: smaller confetti burst
+            this.spawnConfetti(cx, cy, 14, 0.85);
+        } else if (diff === 0) {
+            // Par: small soft particle ring
+            this.spawnConfetti(cx, cy, 8, 0.65);
+        }
+        // Bogey or worse: no celebration (the verdict speaks for itself)
+    }
+
+    private spawnConfetti(cx: number, cy: number, count: number, intensity: number) {
+        const colors = [0xE8922A, 0x4A9D5D, 0xFFD56E, 0x6FB1C9, 0xC8543A, 0xFFF8E7];
+        for (let i = 0; i < count; i++) {
+            const color = colors[i % colors.length];
+            const piece = this.add.rectangle(cx, cy, 5, 8, color, 1).setDepth(950);
+            const angle = (Math.PI * 2 * i) / count + Math.random() * 0.4;
+            const speed = (50 + Math.random() * 90) * intensity;
+            const driftX = Math.cos(angle) * speed;
+            const driftY = Math.sin(angle) * speed - 40 * intensity;
+            this.tweens.add({
+                targets: piece,
+                x: cx + driftX,
+                y: cy + driftY + 80 * intensity,
+                angle: 720 * (Math.random() < 0.5 ? -1 : 1),
+                alpha: { from: 1, to: 0 },
+                duration: 850 + Math.random() * 400,
+                ease: 'Quad.easeIn',
+                onComplete: () => piece.destroy(),
+            });
+        }
     }
 
     private showSinkOverlay(verdict: string, verdictColor: string, subtitle: string) {
@@ -1001,6 +1091,7 @@ export class GolfScene extends Scene {
     }
 
     private resetHole() {
+        this.waterHazardsThisHole = 0;
         this.matter.body.setVelocity(this.ballBody as unknown as MatterJS.BodyType, { x: 0, y: 0 });
         this.matter.body.setPosition(this.ballBody as unknown as MatterJS.BodyType, { x: TEE_WORLD.x, y: TEE_WORLD.y }, false);
         this.ballSprite.setVisible(true);

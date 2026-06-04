@@ -97,7 +97,11 @@ function App() {
                 setPendingHeckleLevel(pending.level);
                 setShowHeckleToast(true);
                 EventBus.emit('heckle-armed', pending.level);
-                setTimeout(() => setShowHeckleToast(false), 3500);
+                // Rumble-tap haptic where supported.
+                if (typeof navigator !== 'undefined' && navigator.vibrate) {
+                    navigator.vibrate([60, 40, 60, 40, 120]);
+                }
+                setTimeout(() => setShowHeckleToast(false), 2400);
             }
         })();
         return () => { cancelled = true; };
@@ -146,22 +150,42 @@ function App() {
                 />
             )}
             {showHeckleToast && (
-                <div style={heckleToastStyle}>
-                    your friend heckled you {pendingHeckleLevel}%
+                <div style={heckleBackdropStyle}>
+                    <div style={{ ...heckleCardStyle, animation: 'ottieHecklePop 280ms ease-out' }}>
+                        <div style={heckleEyebrowStyle}>HECKLE INCOMING</div>
+                        <div style={heckleNumberStyle}>{pendingHeckleLevel}%</div>
+                        <div style={heckleFooterStyle}>your next swing is going to wobble</div>
+                    </div>
                 </div>
             )}
         </div>
     );
 }
 
-const heckleToastStyle: React.CSSProperties = {
-    position: 'fixed', top: 80, left: '50%', transform: 'translateX(-50%)',
-    background: '#2A1810', color: '#E8922A',
-    padding: '12px 18px', borderRadius: 12,
-    fontFamily: 'system-ui, sans-serif', fontSize: 14, fontWeight: 800,
-    letterSpacing: 1, textTransform: 'uppercase',
-    border: '2px solid #C8543A',
-    zIndex: 300, boxShadow: '0 6px 24px rgba(0,0,0,0.4)',
+const heckleBackdropStyle: React.CSSProperties = {
+    position: 'fixed', inset: 0, zIndex: 300,
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    background: 'rgba(0,0,0,0.55)', pointerEvents: 'none',
+};
+const heckleCardStyle: React.CSSProperties = {
+    background: '#2A1810', color: '#FFF8E7',
+    padding: '22px 28px', borderRadius: 16,
+    fontFamily: 'system-ui, sans-serif',
+    textAlign: 'center',
+    border: '3px solid #C8543A',
+    boxShadow: '0 10px 40px rgba(200,84,58,0.4)',
+    minWidth: 240,
+};
+const heckleEyebrowStyle: React.CSSProperties = {
+    fontSize: 11, fontWeight: 800, letterSpacing: 3,
+    color: '#E8922A', marginBottom: 6,
+};
+const heckleNumberStyle: React.CSSProperties = {
+    fontSize: 48, fontWeight: 900, color: '#FFF8E7',
+    lineHeight: 1, marginBottom: 8,
+};
+const heckleFooterStyle: React.CSSProperties = {
+    fontSize: 12, color: '#A68B6D', fontStyle: 'italic',
 };
 
 export default App;
