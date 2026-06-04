@@ -110,18 +110,21 @@ export class GolfScene extends Scene {
 
         // Camera: zoom-to-fit when at rest so the player sees the whole
         // hole, then smoothly zoom-in and follow the ball when in flight.
-        // Tight padding since the world aspect (1:1.67) now closely
-        // matches portrait phones — minimal letterboxing.
         const padX = 20;
         const padY = 80;
         const zX = (this.scale.width  - padX * 2) / WORLD_W;
         const zY = (this.scale.height - padY * 2) / WORLD_H;
         this.overviewZoom = Math.min(zX, zY);
-        // Cap so we don't zoom IN past 1.0 on huge viewports.
         if (this.overviewZoom > 1.0) this.overviewZoom = 1.0;
-        this.cameras.main.setZoom(this.overviewZoom);
-        this.cameras.main.centerOn(WORLD_W / 2, WORLD_H / 2);
-        // No startFollow here — that happens in zoomToFollow() on first swing.
+        this.applyOverviewCamera();
+
+        // Re-fit on viewport resize.
+        this.scale.on('resize', () => {
+            const nzX = (this.scale.width  - padX * 2) / WORLD_W;
+            const nzY = (this.scale.height - padY * 2) / WORLD_H;
+            this.overviewZoom = Math.min(nzX, nzY, 1.0);
+            if (this.state !== 'IN_FLIGHT') this.applyOverviewCamera();
+        });
 
         this.aimHintGfx = this.add.graphics().setDepth(450);
         this.aimGfx = this.add.graphics().setDepth(500);
@@ -391,17 +394,41 @@ export class GolfScene extends Scene {
         }
     }
 
+    /** Direct camera scroll math — Phaser 4 centerOn doesn't behave
+     *  as expected so we compute the scroll position ourselves to
+     *  put the world center in the viewport center. */
+    private applyOverviewCamera() {
+        const cam = this.cameras.main;
+        cam.removeBounds();
+        cam.stopFollow();
+        cam.setZoom(this.overviewZoom);
+        cam.setScroll(
+            WORLD_W / 2 - (this.scale.width  / this.overviewZoom) / 2,
+            WORLD_H / 2 - (this.scale.height / this.overviewZoom) / 2,
+        );
+    }
+
     private zoomToFollow() {
-        // Smooth zoom in while picking up follow.
-        this.cameras.main.zoomTo(1.0, 350, 'Sine.easeInOut');
-        this.cameras.main.startFollow(this.ballSprite, true, 0.1, 0.1);
+        const cam = this.cameras.main;
+        cam.removeBounds();
+        cam.zoomTo(1.0, 350, 'Sine.easeInOut');
+        cam.startFollow(this.ballSprite, true, 0.1, 0.1);
     }
 
     private zoomToOverview() {
-        // Smooth zoom out + drop follow, re-center on world middle.
-        this.cameras.main.stopFollow();
-        this.cameras.main.zoomTo(this.overviewZoom, 400, 'Sine.easeInOut');
-        this.cameras.main.pan(WORLD_W / 2, WORLD_H / 2, 400, 'Sine.easeInOut');
+        const cam = this.cameras.main;
+        cam.stopFollow();
+        cam.removeBounds();
+        const targetScrollX = WORLD_W / 2 - (this.scale.width  / this.overviewZoom) / 2;
+        const targetScrollY = WORLD_H / 2 - (this.scale.height / this.overviewZoom) / 2;
+        cam.zoomTo(this.overviewZoom, 400, 'Sine.easeInOut');
+        this.tweens.add({
+            targets: cam,
+            scrollX: targetScrollX,
+            scrollY: targetScrollY,
+            duration: 400,
+            ease: 'Sine.easeInOut',
+        });
     }
 
     private placeOttie() {
