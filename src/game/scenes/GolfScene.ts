@@ -76,6 +76,9 @@ export class GolfScene extends Scene {
     private panActive = false;
     private panLastAvg = { x: 0, y: 0 };
     private suppressSingleDrag = false;
+    private tutSwingContainer?: Phaser.GameObjects.Container;
+    private tutSwingTween?: Phaser.Tweens.Tween;
+    private firstShotTaken = false;
 
     constructor() { super('GolfScene'); }
 
@@ -146,6 +149,9 @@ export class GolfScene extends Scene {
         EventBus.emit('current-scene-ready', this);
         EventBus.emit('strokes-changed', this.strokes);
         EventBus.emit('distance-to-pin', this.computeDistanceToPin());
+
+        // First-launch onboarding: drag-to-swing finger animation.
+        this.maybeShowSwingHint();
     }
 
     update(_t: number, _dt: number) {
@@ -194,6 +200,10 @@ export class GolfScene extends Scene {
                 this.trailGfx.clear();
                 this.startOttieIdleBob();
                 this.zoomToOverview();
+                if (!this.firstShotTaken) {
+                    this.firstShotTaken = true;
+                    this.maybeShowPanHint();
+                }
                 this.drawAimHint();
                 EventBus.emit('distance-to-pin', this.computeDistanceToPin());
             }
@@ -410,6 +420,99 @@ export class GolfScene extends Scene {
         }
     }
 
+    // ─── Onboarding tutorials ────────────────────────────────────
+
+    private readTutFlag(key: string): boolean {
+        try { return window.localStorage.getItem(`ottiegolf:tut:${key}`) === '1'; }
+        catch { return false; }
+    }
+
+    private writeTutFlag(key: string): void {
+        try { window.localStorage.setItem(`ottiegolf:tut:${key}`, '1'); } catch { /* ignore */ }
+    }
+
+    /** First-launch hint: dim the screen, show an animated finger
+     *  sliding down-and-away to teach the drag-anywhere swing.
+     *  Dismissed by any tap (which also starts the first real swing). */
+    private maybeShowSwingHint() {
+        if (this.readTutFlag('swing')) return;
+        const w = this.scale.width;
+        const h = this.scale.height;
+        const cx = w / 2;
+        const cy = h / 2;
+
+        const c = this.add.container(0, 0).setDepth(1500).setScrollFactor(0);
+        const backdrop = this.add.rectangle(0, 0, w, h, 0x000000, 0.55)
+            .setOrigin(0, 0).setScrollFactor(0);
+        const finger = this.add.circle(cx, cy, 18, 0xFFF8E7, 0.95).setScrollFactor(0);
+        const ring = this.add.circle(cx, cy, 28, 0x000000, 0)
+            .setStrokeStyle(2, 0xFFF8E7, 0.7).setScrollFactor(0);
+        const caption = this.add.text(cx, cy - 80, 'drag anywhere to swing', {
+            fontFamily: 'system-ui, sans-serif',
+            fontSize: '18px',
+            color: '#FFF8E7',
+            fontStyle: 'bold',
+        }).setOrigin(0.5).setScrollFactor(0);
+        const sub = this.add.text(cx, cy - 56, 'release to launch the ball', {
+            fontFamily: 'system-ui, sans-serif',
+            fontSize: '13px',
+            color: '#FFF8E7',
+        }).setOrigin(0.5).setScrollFactor(0).setAlpha(0.75);
+        c.add([backdrop, finger, ring, caption, sub]);
+
+        this.tutSwingTween = this.tweens.add({
+            targets: [finger, ring],
+            y: { from: cy, to: cy + 90 },
+            alpha: { from: 0.95, to: 0.05 },
+            duration: 1100,
+            repeat: -1,
+            ease: 'Quad.easeIn',
+        });
+
+        this.tutSwingContainer = c;
+    }
+
+    private dismissSwingHint() {
+        if (!this.tutSwingContainer) return;
+        this.writeTutFlag('swing');
+        this.tutSwingTween?.stop();
+        this.tutSwingTween = undefined;
+        this.tutSwingContainer.destroy();
+        this.tutSwingContainer = undefined;
+    }
+
+    /** Post-first-shot badge: a small top-center toast teaching the
+     *  two-finger pan gesture. Fades in, holds 3s, fades out. */
+    private maybeShowPanHint() {
+        if (this.readTutFlag('pan')) return;
+        const w = this.scale.width;
+        const badge = this.add.text(w / 2, 18, 'two fingers to look around', {
+            fontFamily: 'system-ui, sans-serif',
+            fontSize: '14px',
+            color: '#FFF8E7',
+            fontStyle: 'bold',
+            backgroundColor: '#1A1A1Acc',
+            padding: { left: 14, right: 14, top: 8, bottom: 8 },
+        }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(1500).setAlpha(0);
+
+        this.tweens.add({
+            targets: badge,
+            alpha: 1,
+            duration: 280,
+            onComplete: () => {
+                this.tweens.add({
+                    targets: badge,
+                    alpha: 0,
+                    delay: 3200,
+                    duration: 420,
+                    onComplete: () => badge.destroy(),
+                });
+            },
+        });
+
+        this.writeTutFlag('pan');
+    }
+
     /** Cover-fit zoom: scale so the world fills the viewport on its
      *  smaller dimension. The larger dimension overflows and gets
      *  cropped offscreen, acceptable here because the gameplay
@@ -572,6 +675,7 @@ export class GolfScene extends Scene {
     }
 
     private onPointerDown(p: Phaser.Input.Pointer) {
+        if (this.tutSwingContainer) this.dismissSwingHint();
         if (this.holeSunk) { this.resetHole(); return; }
 
         // Two-finger pan: the moment a second pointer touches down,
