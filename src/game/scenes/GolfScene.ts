@@ -206,7 +206,7 @@ export class GolfScene extends Scene {
                 this.ottie.setTexture(TEX.ottie);
                 this.trail = [];
                 this.trailGfx.clear();
-                this.startOttieIdleBob();
+                this.moveOttieToBall(bx, by);
                 this.zoomToOverview();
                 if (!this.firstShotTaken) {
                     this.firstShotTaken = true;
@@ -225,7 +225,7 @@ export class GolfScene extends Scene {
         this.ottie.setTexture(TEX.ottie);
         this.trail = [];
         this.trailGfx.clear();
-        this.startOttieIdleBob();
+        this.moveOttieToBall(TEE_WORLD.x, TEE_WORLD.y, true);
         this.zoomToOverview();
         this.drawAimHint();
         EventBus.emit('strokes-changed', this.strokes);
@@ -598,6 +598,27 @@ export class GolfScene extends Scene {
         this.startOttieIdleBob();
     }
 
+    /** Move Ottie to stand next to the ball at the given world position.
+     *  Tween for normal post-shot transitions; immediate for tee respawns
+     *  (water/OOB) since a slow walk across water reads weird. */
+    private moveOttieToBall(ballX: number, ballY: number, immediate = false) {
+        const tx = ballX - 22;
+        const ty = ballY - 4;
+        this.stopOttieIdleBob();
+        if (immediate) {
+            this.ottie.setPosition(tx, ty);
+            this.startOttieIdleBob();
+            return;
+        }
+        this.tweens.add({
+            targets: this.ottie,
+            x: tx, y: ty,
+            duration: 550,
+            ease: 'Sine.easeInOut',
+            onComplete: () => this.startOttieIdleBob(),
+        });
+    }
+
     private placeBall() {
         this.ballBody = this.matter.add.circle(TEE_WORLD.x, TEE_WORLD.y, COURSE.ballRadius, {
             restitution: BALL_PHYSICS.restitution,
@@ -885,7 +906,7 @@ export class GolfScene extends Scene {
         this.trail = [];
         this.trailGfx.clear();
         this.ottie.setTexture(TEX.ottie);
-        this.startOttieIdleBob();
+        this.moveOttieToBall(HOLE_WORLD.x, HOLE_WORLD.y);
 
         const diff = this.strokes - ACTIVE_HOLE.par;
         const verdict =
@@ -963,7 +984,7 @@ export class GolfScene extends Scene {
         this.strokes += 1;
         this.state = 'IDLE';
         this.ottie.setTexture(TEX.ottie);
-        this.startOttieIdleBob();
+        this.moveOttieToBall(TEE_WORLD.x, TEE_WORLD.y, true);
         EventBus.emit('strokes-changed', this.strokes);
         EventBus.emit('distance-to-pin', this.computeDistanceToPin());
 
