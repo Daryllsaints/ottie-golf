@@ -65,6 +65,11 @@ export class GolfScene extends Scene {
     private wangOceanGrass!: WangSet;
     private wangGrassSand!:  WangSet;
     private wangGrassGreen!: WangSet;
+    private aimHintGfx!: Phaser.GameObjects.Graphics;
+    private flagSprite?: Phaser.GameObjects.Graphics;
+    private overviewZoom = 1.0;
+    private cupHaloTween?: Phaser.Tweens.Tween;
+    private cupHalo?: Phaser.GameObjects.Arc;
 
     constructor() { super('GolfScene'); }
 
@@ -100,10 +105,25 @@ export class GolfScene extends Scene {
         this.placeOttie();
         this.placeBall();
 
-        // Camera follows ball, slight smoothing
+        // Camera: zoom-to-fit when at rest so the player sees the whole
+        // hole, then smoothly zoom-in and follow the ball when in flight.
+        // Compute the zoom that fits both axes with some margin.
+        const padX = 80;
+        const padY = 140;
+        const zX = (this.scale.width  - padX * 2) / WORLD_W;
+        const zY = (this.scale.height - padY * 2) / WORLD_H;
+        this.overviewZoom = Math.min(zX, zY);
+        // Cap so we don't zoom IN past 1.0 on huge viewports.
+        if (this.overviewZoom > 1.0) this.overviewZoom = 1.0;
+        this.cameras.main.setZoom(this.overviewZoom);
+        this.cameras.main.centerOn(WORLD_W / 2, WORLD_H / 2);
         this.cameras.main.startFollow(this.ballSprite, true, 0.08, 0.08);
+        // Holding the overview position until the first swing.
+        this.cameras.main.stopFollow();
 
+        this.aimHintGfx = this.add.graphics().setDepth(450);
         this.aimGfx = this.add.graphics().setDepth(500);
+        this.drawAimHint();
 
         this.input.on('pointerdown', (p: Phaser.Input.Pointer) => this.onPointerDown(p));
         this.input.on('pointermove', (p: Phaser.Input.Pointer) => this.onPointerMove(p));
@@ -160,6 +180,8 @@ export class GolfScene extends Scene {
                 this.trail = [];
                 this.trailGfx.clear();
                 this.startOttieIdleBob();
+                this.zoomToOverview();
+                this.drawAimHint();
                 EventBus.emit('distance-to-pin', this.computeDistanceToPin());
             }
         }
@@ -173,6 +195,8 @@ export class GolfScene extends Scene {
         this.trail = [];
         this.trailGfx.clear();
         this.startOttieIdleBob();
+        this.zoomToOverview();
+        this.drawAimHint();
         EventBus.emit('strokes-changed', this.strokes);
         EventBus.emit('distance-to-pin', this.computeDistanceToPin());
 
@@ -304,21 +328,78 @@ export class GolfScene extends Scene {
     }
 
     private drawHole() {
+        // Pulsing halo around the cup so the target reads from far away.
+        this.cupHalo = this.add.circle(HOLE_WORLD.x, HOLE_WORLD.y, 18, 0xFFF8E7, 0.25).setDepth(9);
+        this.cupHaloTween = this.tweens.add({
+            targets: this.cupHalo,
+            radius: 26,
+            alpha: 0.05,
+            duration: 1200,
+            yoyo: true,
+            repeat: -1,
+            ease: 'Sine.easeInOut',
+        });
+
         // Cup
         this.add.circle(HOLE_WORLD.x, HOLE_WORLD.y, COURSE.holeRadius, COLORS.hole, 1).setDepth(10);
         // Flag pole + flag
-        const pole = this.add.graphics().setDepth(11);
-        pole.lineStyle(2, 0xF0EAD2, 1);
-        pole.beginPath();
-        pole.moveTo(HOLE_WORLD.x, HOLE_WORLD.y);
-        pole.lineTo(HOLE_WORLD.x, HOLE_WORLD.y - 28);
-        pole.strokePath();
-        pole.fillStyle(0xC8543A, 1);
-        pole.fillTriangle(
+        this.flagSprite = this.add.graphics().setDepth(11);
+        this.flagSprite.lineStyle(2, 0xF0EAD2, 1);
+        this.flagSprite.beginPath();
+        this.flagSprite.moveTo(HOLE_WORLD.x, HOLE_WORLD.y);
+        this.flagSprite.lineTo(HOLE_WORLD.x, HOLE_WORLD.y - 28);
+        this.flagSprite.strokePath();
+        this.flagSprite.fillStyle(0xC8543A, 1);
+        this.flagSprite.fillTriangle(
             HOLE_WORLD.x, HOLE_WORLD.y - 28,
             HOLE_WORLD.x + 16, HOLE_WORLD.y - 24,
             HOLE_WORLD.x, HOLE_WORLD.y - 18,
         );
+    }
+
+    private drawAimHint() {
+        this.aimHintGfx.clear();
+        if (this.state !== 'IDLE' || this.holeSunk) return;
+        const bx = this.ballBody.position.x;
+        const by = this.ballBody.position.y;
+        const dx = HOLE_WORLD.x - bx;
+        const dy = HOLE_WORLD.y - by;
+        const dist = Math.hypot(dx, dy);
+        if (dist < 20) return;
+        const ux = dx / dist;
+        const uy = dy / dist;
+        // Dashed line from ball to cup — 12px dashes, 10px gaps.
+        const dashLen = 14;
+        const gapLen = 10;
+        const seg = dashLen + gapLen;
+        const startOffset = 18; // pull away from ball so it doesn't overlap
+        const endOffset = 22;   // pull back from cup to avoid the pin
+        const usable = dist - startOffset - endOffset;
+        if (usable < seg) return;
+        this.aimHintGfx.lineStyle(2, 0xFFF8E7, 0.45);
+        for (let d = startOffset; d + dashLen <= dist - endOffset; d += seg) {
+            const x1 = bx + ux * d;
+            const y1 = by + uy * d;
+            const x2 = bx + ux * (d + dashLen);
+            const y2 = by + uy * (d + dashLen);
+            this.aimHintGfx.beginPath();
+            this.aimHintGfx.moveTo(x1, y1);
+            this.aimHintGfx.lineTo(x2, y2);
+            this.aimHintGfx.strokePath();
+        }
+    }
+
+    private zoomToFollow() {
+        // Smooth zoom in while picking up follow.
+        this.cameras.main.zoomTo(1.0, 350, 'Sine.easeInOut');
+        this.cameras.main.startFollow(this.ballSprite, true, 0.1, 0.1);
+    }
+
+    private zoomToOverview() {
+        // Smooth zoom out + drop follow, re-center on world middle.
+        this.cameras.main.stopFollow();
+        this.cameras.main.zoomTo(this.overviewZoom, 400, 'Sine.easeInOut');
+        this.cameras.main.pan(WORLD_W / 2, WORLD_H / 2, 400, 'Sine.easeInOut');
     }
 
     private placeOttie() {
@@ -396,6 +477,7 @@ export class GolfScene extends Scene {
         this.dragOrigin = { x: bx, y: by };
         this.dragCurrent = { x: p.worldX, y: p.worldY };
         this.dragStartMs = this.time.now;
+        this.aimHintGfx.clear();
         this.drawAimGuide();
     }
 
@@ -414,7 +496,11 @@ export class GolfScene extends Scene {
 
         this.aimGfx.clear();
 
-        if (pullMag < SWING.minDragPx) { this.state = 'IDLE'; return; }
+        if (pullMag < SWING.minDragPx) {
+            this.state = 'IDLE';
+            this.drawAimHint();
+            return;
+        }
 
         const clamped = Math.min(pullMag, SWING.maxDragPx);
         const tNorm = clamped / SWING.maxDragPx;
@@ -445,6 +531,8 @@ export class GolfScene extends Scene {
         EventBus.emit('strokes-changed', this.strokes);
         this.stopOttieIdleBob();
         this.ottie.setTexture(TEX.ottieSwing);
+        this.aimHintGfx.clear();
+        this.zoomToFollow();
     }
 
     private drawAimGuide() {
@@ -627,6 +715,8 @@ export class GolfScene extends Scene {
         this.state = 'IDLE';
         this.sinkOverlay?.destroy();
         this.sinkOverlay = undefined;
+        this.zoomToOverview();
+        this.drawAimHint();
         EventBus.emit('strokes-changed', this.strokes);
         EventBus.emit('distance-to-pin', this.computeDistanceToPin());
     }

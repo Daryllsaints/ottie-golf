@@ -106,7 +106,9 @@ export const HOLE_1 = {
 } as const
 
 export const SWING = {
-  hitRadiusPx: 48,
+  // Generous hit radius — at the zoomed-out overview camera, ball
+  // renders at half-size; this keeps finger taps forgiving.
+  hitRadiusPx: 80,
   maxDragPx: 200,
   minDragPx: 12,
   // Tuned for Sawgrass #17 par-3 (~185 yds tee-to-pin) so a clean
