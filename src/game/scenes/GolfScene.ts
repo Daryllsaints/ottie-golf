@@ -88,8 +88,11 @@ export class GolfScene extends Scene {
     }
 
     create() {
-        // World + camera bounds
-        this.cameras.main.setBounds(0, 0, WORLD_W, WORLD_H);
+        // Matter world bounds keep the ball in-world. Camera bounds are
+        // intentionally NOT set so the overview camera can center the
+        // smaller-than-viewport world horizontally on portrait phones
+        // (otherwise bounds clamp the camera and push the world to one
+        // side of the screen).
         this.matter.world.setBounds(0, 0, WORLD_W, WORLD_H);
 
         // Register Wang tileset frames + build pattern lookups
@@ -108,8 +111,8 @@ export class GolfScene extends Scene {
         // Camera: zoom-to-fit when at rest so the player sees the whole
         // hole, then smoothly zoom-in and follow the ball when in flight.
         // Compute the zoom that fits both axes with some margin.
-        const padX = 80;
-        const padY = 140;
+        const padX = 60;
+        const padY = 200; // extra top padding so the par-card HUD doesn't cover the green
         const zX = (this.scale.width  - padX * 2) / WORLD_W;
         const zY = (this.scale.height - padY * 2) / WORLD_H;
         this.overviewZoom = Math.min(zX, zY);
@@ -117,9 +120,7 @@ export class GolfScene extends Scene {
         if (this.overviewZoom > 1.0) this.overviewZoom = 1.0;
         this.cameras.main.setZoom(this.overviewZoom);
         this.cameras.main.centerOn(WORLD_W / 2, WORLD_H / 2);
-        this.cameras.main.startFollow(this.ballSprite, true, 0.08, 0.08);
-        // Holding the overview position until the first swing.
-        this.cameras.main.stopFollow();
+        // No startFollow here — that happens in zoomToFollow() on first swing.
 
         this.aimHintGfx = this.add.graphics().setDepth(450);
         this.aimGfx = this.add.graphics().setDepth(500);
