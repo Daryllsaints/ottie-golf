@@ -526,12 +526,13 @@ export class GolfScene extends Scene {
     private onPointerDown(p: Phaser.Input.Pointer) {
         if (this.holeSunk) { this.resetHole(); return; }
         if (this.state !== 'IDLE') return;
-        const bx = this.ballBody.position.x;
-        const by = this.ballBody.position.y;
-        const d = Math.hypot(p.worldX - bx, p.worldY - by);
-        if (d > SWING.hitRadiusPx) return;
+        // Pool-style drag: gesture origin is wherever the finger first
+        // touched, not the ball. This frees the player from having to
+        // pull the ball back from awkward edge-of-screen positions.
+        // The aim guide still renders from the ball; only the gesture
+        // measurement uses dragOrigin.
         this.state = 'AIMING';
-        this.dragOrigin = { x: bx, y: by };
+        this.dragOrigin = { x: p.worldX, y: p.worldY };
         this.dragCurrent = { x: p.worldX, y: p.worldY };
         this.dragStartMs = this.time.now;
         this.aimHintGfx.clear();
@@ -603,8 +604,15 @@ export class GolfScene extends Scene {
         const tNorm = clamped / SWING.maxDragPx;
         const baseAngle = Math.atan2(-pullY / pullMag, -pullX / pullMag);
         const oscAngle = baseAngle + this.currentHoldOscRad();
-        const endX = this.dragOrigin.x + Math.cos(oscAngle) * clamped;
-        const endY = this.dragOrigin.y + Math.sin(oscAngle) * clamped;
+
+        // Aim guide always renders FROM the ball, regardless of where
+        // the finger touched. Drag distance/direction still drives the
+        // shot, but the line shows the shot trajectory relative to the
+        // ball — which is the bit the player actually cares about.
+        const bx = this.ballBody.position.x;
+        const by = this.ballBody.position.y;
+        const endX = bx + Math.cos(oscAngle) * clamped;
+        const endY = by + Math.sin(oscAngle) * clamped;
 
         const zone = this.powerZone(tNorm);
         const color =
@@ -614,15 +622,15 @@ export class GolfScene extends Scene {
 
         this.aimGfx.lineStyle(3, color, 0.95);
         this.aimGfx.beginPath();
-        this.aimGfx.moveTo(this.dragOrigin.x, this.dragOrigin.y);
+        this.aimGfx.moveTo(bx, by);
         this.aimGfx.lineTo(endX, endY);
         this.aimGfx.strokePath();
 
         const dotCount = 6;
         for (let i = 1; i <= dotCount; i++) {
             const t = i / (dotCount + 1);
-            const dx = this.dragOrigin.x + Math.cos(oscAngle) * clamped * t;
-            const dy = this.dragOrigin.y + Math.sin(oscAngle) * clamped * t;
+            const dx = bx + Math.cos(oscAngle) * clamped * t;
+            const dy = by + Math.sin(oscAngle) * clamped * t;
             this.aimGfx.fillStyle(color, 0.7);
             this.aimGfx.fillCircle(dx, dy, 2);
         }
@@ -632,8 +640,8 @@ export class GolfScene extends Scene {
         const tickLen = 8;
         this.aimGfx.lineStyle(2, COLORS.aimGuideSweet, 0.85);
         for (const tFrac of [SWING.sweetSpotMin, SWING.sweetSpotMax]) {
-            const tx = this.dragOrigin.x + Math.cos(baseAngle) * tFrac * SWING.maxDragPx;
-            const ty = this.dragOrigin.y + Math.sin(baseAngle) * tFrac * SWING.maxDragPx;
+            const tx = bx + Math.cos(baseAngle) * tFrac * SWING.maxDragPx;
+            const ty = by + Math.sin(baseAngle) * tFrac * SWING.maxDragPx;
             this.aimGfx.beginPath();
             this.aimGfx.moveTo(tx - perpX * tickLen, ty - perpY * tickLen);
             this.aimGfx.lineTo(tx + perpX * tickLen, ty + perpY * tickLen);
