@@ -100,6 +100,9 @@ export class GolfScene extends Scene {
     private ottieIdleAnchor = { x: 0, y: 0 };
     private heckleInterferedLastShot = false;
     private powerLabel?: Phaser.GameObjects.Text;
+    private lastAimZone: 'under' | 'sweet' | 'over' | null = null;
+    private pendingGrade: { label: string; color: string; isPure: boolean; cause: string } | null = null;
+    private cupApproachSlowTriggered = false;
 
     constructor() { super('GolfScene'); }
 
@@ -250,6 +253,21 @@ export class GolfScene extends Scene {
             const distToHole = Math.hypot(bx - HOLE_WORLD.x, by - HOLE_WORLD.y);
             if (distToHole < COURSE.holeRadius + 2) { this.sinkBall(); return; }
 
+            // Cup-approach micro slow-mo. Fires once per shot when the
+            // ball drifts within striking range of the cup and is
+            // still moving. The 'will it / won't it' beat.
+            if (
+                !this.cupApproachSlowTriggered &&
+                distToHole < 60 && distToHole > COURSE.holeRadius + 2
+            ) {
+                const vel = (this.ballBody as unknown as { velocity: { x: number; y: number } }).velocity;
+                const sp = Math.hypot(vel.x, vel.y);
+                if (sp > 0.6 && sp < 6) {
+                    this.cupApproachSlowTriggered = true;
+                    this.triggerCupApproachSlowMo();
+                }
+            }
+
             // OOB: ball outside world rect (matter world bounds will
             // bounce it; this is a softer respawn for clean UX)
             if (bx < 0 || bx > WORLD_W || by < 0 || by > WORLD_H) {
@@ -279,11 +297,23 @@ export class GolfScene extends Scene {
                 }
                 this.drawAimHint();
                 EventBus.emit('distance-to-pin', this.computeDistanceToPin());
+                EventBus.emit('hud-visibility', true);
+                // Now the story has played out, show the verdict.
+                if (this.pendingGrade) {
+                    this.showContactGrade(
+                        this.pendingGrade.label,
+                        this.pendingGrade.color,
+                        this.pendingGrade.isPure,
+                        this.pendingGrade.cause,
+                    );
+                    this.pendingGrade = null;
+                }
             }
         }
     }
 
     private handleWaterHazard() {
+        this.pendingGrade = null;
         this.matter.body.setPosition(this.ballBody as unknown as MatterJS.BodyType, { x: TEE_WORLD.x, y: TEE_WORLD.y }, false);
         // Soft mulligan: first water-hazard per hole is free, framed
         // as a learning beat rather than a punishment. Subsequent ones
@@ -1071,26 +1101,27 @@ export class GolfScene extends Scene {
             { x: Math.cos(finalAngle) * speed, y: Math.sin(finalAngle) * speed },
         );
 
-        // Grade the contact and pop the verdict label. PURE shots
-        // earn the slow-mo zoom-punch beat.
+        // Grade the contact but DEFER the verdict label until the
+        // ball comes to rest. The release moment belongs to the
+        // thwack; the grade is the story's epilogue.
         const holdMs = this.time.now - this.dragStartMs;
-        const grade = this.gradeContact(zone, tNorm, holdMs, heckleAppliedAmount);
-        this.showContactGrade(grade.label, grade.color, grade.isPure, grade.cause);
-        if (grade.isPure) this.applyPureContactEffect();
+        this.pendingGrade = this.gradeContact(zone, tNorm, holdMs, heckleAppliedAmount);
 
         this.state = 'IN_FLIGHT';
         this.strokes += 1;
-        this.haptic(grade.isPure ? [22, 30, 40] : [18]);
-        this.sfx(SFX.swing, grade.isPure ? 0.75 : 0.55);
+        this.cupApproachSlowTriggered = false;
+        this.haptic([18]);
+        this.sfx(SFX.swing, 0.55);
         this.spawnSwingDust(this.ballBody.position.x, this.ballBody.position.y, finalAngle);
         EventBus.emit('strokes-changed', this.strokes);
+        EventBus.emit('hud-visibility', false);
         this.stopOttieIdleBob();
         this.ottie.setTexture(TEX.ottieSwing);
         this.aimHintGfx.clear();
-        this.powerLabel?.setVisible(false);
         this.clearEdgeWarning();
         this.playOttieSwingAnim();
         this.focusOnOttieThenBall();
+        this.lastAimZone = null;
     }
 
     /** Soft scale pulse on Ottie at swing release, paced to match
@@ -1114,10 +1145,7 @@ export class GolfScene extends Scene {
         const pullX = this.dragCurrent.x - this.dragOrigin.x;
         const pullY = this.dragCurrent.y - this.dragOrigin.y;
         const pullMag = Math.hypot(pullX, pullY);
-        if (pullMag < SWING.minDragPx) {
-            if (this.powerLabel) { this.powerLabel.setVisible(false); }
-            return;
-        }
+        if (pullMag < SWING.minDragPx) return;
 
         const clamped = Math.min(pullMag, SWING.maxDragPx);
         const tNorm = clamped / SWING.maxDragPx;
@@ -1126,82 +1154,57 @@ export class GolfScene extends Scene {
 
         const bx = this.ballBody.position.x;
         const by = this.ballBody.position.y;
+        const club = CLUBS[this.currentClub];
+        const zone = this.powerZone(tNorm);
+
+        // Single thin aim line: subtle, cream-coloured, regardless of
+        // zone. Players learn the timing through repetition and the
+        // sweet-spot pulse below, not by reading a colored bar.
         const endX = bx + Math.cos(oscAngle) * clamped;
         const endY = by + Math.sin(oscAngle) * clamped;
-
-        const zone = this.powerZone(tNorm);
-        const color =
-            zone === 'sweet' ? COLORS.aimGuideSweet :
-            zone === 'over'  ? COLORS.aimGuideOver  :
-                               COLORS.aimGuideUnder;
-
-        // Base aim line: thin, runs the full pull distance so the
-        // player sees their current power directly.
-        this.aimGfx.lineStyle(3, color, 0.95);
+        this.aimGfx.lineStyle(2, 0xFFF8E7, 0.55);
         this.aimGfx.beginPath();
         this.aimGfx.moveTo(bx, by);
         this.aimGfx.lineTo(endX, endY);
         this.aimGfx.strokePath();
 
-        // SWEET BAND: a thick highlighted segment along the aim line
-        // showing exactly the range of pull distances that count as
-        // sweet zone. Release with the line ending inside this band.
-        const club = CLUBS[this.currentClub];
-        const sweetStart = club.sweetMin * SWING.maxDragPx;
-        const sweetEnd   = club.sweetMax * SWING.maxDragPx;
-        const sweetSx = bx + Math.cos(oscAngle) * sweetStart;
-        const sweetSy = by + Math.sin(oscAngle) * sweetStart;
-        const sweetEx = bx + Math.cos(oscAngle) * sweetEnd;
-        const sweetEy = by + Math.sin(oscAngle) * sweetEnd;
-        const bandPulse = 0.6 + 0.4 * Math.sin(this.time.now * 0.012);
-        const bandAlpha = zone === 'sweet' ? 0.75 + 0.2 * bandPulse : 0.45;
-        this.aimGfx.lineStyle(8, COLORS.aimGuideSweet, bandAlpha);
-        this.aimGfx.beginPath();
-        this.aimGfx.moveTo(sweetSx, sweetSy);
-        this.aimGfx.lineTo(sweetEx, sweetEy);
-        this.aimGfx.strokePath();
-
-        // Caps at each end of the sweet band, perpendicular to the
-        // aim line. Make the boundaries unmistakable.
-        const perpX = -Math.sin(baseAngle);
-        const perpY =  Math.cos(baseAngle);
-        const capLen = 14;
-        this.aimGfx.lineStyle(3, COLORS.aimGuideSweet, 0.95);
-        this.aimGfx.beginPath();
-        this.aimGfx.moveTo(sweetSx - perpX * capLen, sweetSy - perpY * capLen);
-        this.aimGfx.lineTo(sweetSx + perpX * capLen, sweetSy + perpY * capLen);
-        this.aimGfx.moveTo(sweetEx - perpX * capLen, sweetEy - perpY * capLen);
-        this.aimGfx.lineTo(sweetEx + perpX * capLen, sweetEy + perpY * capLen);
-        this.aimGfx.strokePath();
-
-        // OVER-PULL warning: if the line extends past the sweet end,
-        // hatch the overflow segment in red so the over-zone is
-        // visible BEFORE you release.
-        if (zone === 'over') {
-            this.aimGfx.lineStyle(5, COLORS.aimGuideOver, 0.85);
-            this.aimGfx.beginPath();
-            this.aimGfx.moveTo(sweetEx, sweetEy);
-            this.aimGfx.lineTo(endX, endY);
-            this.aimGfx.strokePath();
+        // 4 fading trajectory dots that commit to direction without
+        // revealing exact landing. Dots get smaller and more
+        // transparent toward the tip.
+        const dotCount = 4;
+        for (let i = 1; i <= dotCount; i++) {
+            const t = i / (dotCount + 1);
+            const dx = bx + Math.cos(oscAngle) * clamped * t;
+            const dy = by + Math.sin(oscAngle) * clamped * t;
+            const a = 0.7 * (1 - t * 0.6);
+            const r = 3 - t * 1.4;
+            this.aimGfx.fillStyle(0xFFF8E7, a);
+            this.aimGfx.fillCircle(dx, dy, r);
         }
 
-        // Live power readout floating just off the ball.
-        const pct = Math.round(tNorm * 100);
-        if (!this.powerLabel) {
-            this.powerLabel = this.add.text(0, 0, '', {
-                fontFamily: 'system-ui, sans-serif',
-                fontSize: '14px',
-                color: '#FFF8E7',
-                fontStyle: 'bold',
-            }).setOrigin(0.5, 0.5).setDepth(510);
-            this.powerLabel.setStroke('#1A1A1A', 4);
+        // Subtle pulse marker at the center of the sweet zone. This
+        // is the only visible signal of where to release. Pulses at
+        // a steady 1.2 Hz; intensity gently lifts when the current
+        // pull is INSIDE the sweet zone (haptic tick handles the
+        // crossing event).
+        const sweetCenter = (club.sweetMin + club.sweetMax) / 2 * SWING.maxDragPx;
+        const mx = bx + Math.cos(oscAngle) * sweetCenter;
+        const my = by + Math.sin(oscAngle) * sweetCenter;
+        const pulse = 0.55 + 0.35 * Math.sin(this.time.now * 0.008);
+        const inSweet = zone === 'sweet';
+        const markerR = 6 + (inSweet ? 4 : 2) * pulse;
+        const markerA = (inSweet ? 0.85 : 0.55) * pulse;
+        this.aimGfx.fillStyle(0xFFF8E7, markerA * 0.4);
+        this.aimGfx.fillCircle(mx, my, markerR + 3);
+        this.aimGfx.fillStyle(0xFFF8E7, markerA);
+        this.aimGfx.fillCircle(mx, my, markerR);
+
+        // Haptic tick when crossing into / out of the sweet zone.
+        // Single short vibration, lets the hand learn the threshold.
+        if (zone === 'sweet' && this.lastAimZone !== 'sweet') {
+            this.haptic([10]);
         }
-        this.powerLabel
-            .setVisible(true)
-            .setText(`${pct}%`)
-            .setColor(color === COLORS.aimGuideSweet ? '#73C47B'
-                : color === COLORS.aimGuideOver ? '#C8543A' : '#FFF8E7')
-            .setPosition(bx - perpX * 22, by - perpY * 22);
+        this.lastAimZone = zone;
     }
 
     private drawTrail() {
@@ -1222,6 +1225,7 @@ export class GolfScene extends Scene {
 
     private sinkBall() {
         this.holeSunk = true;
+        this.pendingGrade = null;
         this.haptic([30, 50, 30, 50, 60]);
         this.sfx(SFX.cupRattle, 0.5);
         this.time.delayedCall(220, () => this.sfx(SFX.sink, 0.65));
@@ -1398,9 +1402,34 @@ export class GolfScene extends Scene {
         });
     }
 
+    /** Cup-approach slow-mo: when the ball coasts into striking range
+     *  of the cup, drop time scale for the 'will it' beat. Camera
+     *  zooms in slightly on the cup so the framing matches the
+     *  emotional weight. */
+    private triggerCupApproachSlowMo() {
+        const cam = this.cameras.main;
+        const baseZoom = cam.zoom;
+        const physWorld = this.matter.world as unknown as { engine: { timing: { timeScale: number } } };
+        const baseEngineTs = physWorld.engine.timing.timeScale;
+        const baseSceneTs = this.time.timeScale;
+
+        this.time.timeScale = 0.45;
+        physWorld.engine.timing.timeScale = 0.45;
+        cam.zoomTo(baseZoom * 1.12, 220, 'Sine.easeInOut');
+
+        // Real-time restore so the slowed timeScale doesn't extend
+        // the wall-clock duration.
+        window.setTimeout(() => {
+            this.time.timeScale = baseSceneTs;
+            physWorld.engine.timing.timeScale = baseEngineTs;
+            cam.zoomTo(baseZoom, 280, 'Sine.easeInOut');
+        }, 520);
+    }
+
     /** Cinematic micro-beat for PURE contacts. Drops time scale to
      *  0.35 for ~260ms (engine + scene), zoom-punches the camera 8%
-     *  in then back, and brightens the ball trail. */
+     *  in then back, and brightens the ball trail. (Kept for now,
+     *  unused: research moved cinematic slow-mo to cup-approach.) */
     private applyPureContactEffect() {
         const cam = this.cameras.main;
         const baseZoom = cam.zoom;
@@ -1579,6 +1608,7 @@ export class GolfScene extends Scene {
     }
 
     private handleOutOfBounds() {
+        this.pendingGrade = null;
         this.matter.body.setVelocity(this.ballBody as unknown as MatterJS.BodyType, { x: 0, y: 0 });
         this.matter.body.setPosition(this.ballBody as unknown as MatterJS.BodyType, { x: TEE_WORLD.x, y: TEE_WORLD.y }, false);
         this.strokes += 1;

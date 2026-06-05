@@ -38,7 +38,14 @@ function App() {
     const [matchComplete, setMatchComplete] = useState(false);
     const [recap, setRecap] = useState<null | { prevName: string; nextName: string; nextPar: number; me: number; opp: number; nextNum: number }>(null);
     const [club, setClub] = useState<ClubKey>(() => lastClub());
+    const [hudVisible, setHudVisible] = useState(true);
     const pendingHeckleCommitRef = useRef(0);
+
+    useEffect(() => {
+        const handler = (visible: boolean) => setHudVisible(visible);
+        EventBus.on('hud-visibility', handler);
+        return () => { EventBus.removeListener('hud-visibility', handler); };
+    }, []);
 
     // Keep the scene's idea of the current club in sync with React state.
     useEffect(() => {
@@ -170,14 +177,16 @@ function App() {
     return (
         <div id="app">
             <PhaserGame ref={phaserRef} />
-            <HUD
-                holeName={ACTIVE_HOLE.name}
-                strokes={strokes}
-                distance={distance}
-                holeNum={holeIdx + 1}
-                holeCount={HOLES.length}
-                runningTotals={route.kind === 'match' ? { me: myTotal, opp: opponentTotal, opponentLabel: opponentName ?? 'them' } : undefined}
-            />
+            <div style={hudVisible ? hudShellVisible : hudShellHidden}>
+                <HUD
+                    holeName={ACTIVE_HOLE.name}
+                    strokes={strokes}
+                    distance={distance}
+                    holeNum={holeIdx + 1}
+                    holeCount={HOLES.length}
+                    runningTotals={route.kind === 'match' ? { me: myTotal, opp: opponentTotal, opponentLabel: opponentName ?? 'them' } : undefined}
+                />
+            </div>
             {showShareCard && match && (
                 <ShareCard
                     matchId={match.id}
@@ -200,7 +209,9 @@ function App() {
                     opponentName={opponentName}
                 />
             )}
-            <ClubPicker current={club} onChange={setClub} />
+            <div style={hudVisible ? hudShellVisible : hudShellHidden}>
+                <ClubPicker current={club} onChange={setClub} />
+            </div>
             {showHeckleToast && (
                 <div style={heckleBackdropStyle}>
                     <div style={{ ...heckleCardStyle, animation: 'ottieHecklePop 280ms ease-out' }}>
@@ -235,6 +246,13 @@ function App() {
         </div>
     );
 }
+
+const hudShellVisible: React.CSSProperties = {
+    opacity: 1, transition: 'opacity 320ms ease-out',
+};
+const hudShellHidden: React.CSSProperties = {
+    opacity: 0, transition: 'opacity 220ms ease-in', pointerEvents: 'none',
+};
 
 const heckleBackdropStyle: React.CSSProperties = {
     position: 'fixed', inset: 0, zIndex: 300,
