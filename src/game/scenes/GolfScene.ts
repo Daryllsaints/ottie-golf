@@ -99,6 +99,7 @@ export class GolfScene extends Scene {
     private edgeWarningPhase = 0;
     private ottieIdleAnchor = { x: 0, y: 0 };
     private heckleInterferedLastShot = false;
+    private powerLabel?: Phaser.GameObjects.Text;
 
     constructor() { super('GolfScene'); }
 
@@ -736,6 +737,26 @@ export class GolfScene extends Scene {
         cam.startFollow(this.ballSprite, true, 0.1, 0.1);
     }
 
+    /** Briefly focus the camera on Ottie at swing release so the
+     *  player sees the swing pose, then hand off to ball-follow.
+     *  ~340ms total: 140ms pan-in + 200ms hold on Ottie. The ball is
+     *  in flight during this window so the hand-off is smooth. */
+    private focusOnOttieThenBall() {
+        const cam = this.cameras.main;
+        cam.stopFollow();
+        cam.removeBounds();
+        cam.setSize(this.scale.width, this.scale.height);
+        const ox = this.ottie.x;
+        const oy = this.ottie.y;
+        cam.zoomTo(1.4, 140, 'Cubic.easeOut');
+        cam.pan(ox, oy, 140, 'Cubic.easeOut');
+        this.time.delayedCall(280, () => {
+            if (this.state !== 'IN_FLIGHT') return;
+            cam.zoomTo(1.0, 260, 'Sine.easeInOut');
+            cam.startFollow(this.ballSprite, true, 0.1, 0.1);
+        });
+    }
+
     private zoomToOverview() {
         const cam = this.cameras.main;
         cam.stopFollow();
@@ -1038,7 +1059,7 @@ export class GolfScene extends Scene {
         // earn the slow-mo zoom-punch beat.
         const holdMs = this.time.now - this.dragStartMs;
         const grade = this.gradeContact(zone, tNorm, holdMs, heckleAppliedAmount);
-        this.showContactGrade(grade.label, grade.color, grade.isPure);
+        this.showContactGrade(grade.label, grade.color, grade.isPure, grade.cause);
         if (grade.isPure) this.applyPureContactEffect();
 
         this.state = 'IN_FLIGHT';
@@ -1050,8 +1071,24 @@ export class GolfScene extends Scene {
         this.stopOttieIdleBob();
         this.ottie.setTexture(TEX.ottieSwing);
         this.aimHintGfx.clear();
+        this.powerLabel?.setVisible(false);
         this.clearEdgeWarning();
-        this.zoomToFollow();
+        this.playOttieSwingAnim();
+        this.focusOnOttieThenBall();
+    }
+
+    /** Quick scale-pulse on Ottie at the moment of release so the
+     *  static swing sprite gets some life. Mid-pulse the camera is
+     *  already focused on him via focusOnOttieThenBall(). */
+    private playOttieSwingAnim() {
+        const baseScale = 0.3;
+        this.tweens.killTweensOf(this.ottie);
+        this.tweens.add({
+            targets: this.ottie,
+            scale: { from: baseScale * 1.18, to: baseScale },
+            duration: 280,
+            ease: 'Back.easeOut',
+        });
     }
 
     private drawAimGuide() {
@@ -1059,17 +1096,16 @@ export class GolfScene extends Scene {
         const pullX = this.dragCurrent.x - this.dragOrigin.x;
         const pullY = this.dragCurrent.y - this.dragOrigin.y;
         const pullMag = Math.hypot(pullX, pullY);
-        if (pullMag < SWING.minDragPx) return;
+        if (pullMag < SWING.minDragPx) {
+            if (this.powerLabel) { this.powerLabel.setVisible(false); }
+            return;
+        }
 
         const clamped = Math.min(pullMag, SWING.maxDragPx);
         const tNorm = clamped / SWING.maxDragPx;
         const baseAngle = Math.atan2(-pullY / pullMag, -pullX / pullMag);
         const oscAngle = baseAngle + this.currentHoldOscRad();
 
-        // Aim guide always renders FROM the ball, regardless of where
-        // the finger touched. Drag distance/direction still drives the
-        // shot, but the line shows the shot trajectory relative to the
-        // ball, which is the bit the player actually cares about.
         const bx = this.ballBody.position.x;
         const by = this.ballBody.position.y;
         const endX = bx + Math.cos(oscAngle) * clamped;
@@ -1081,33 +1117,73 @@ export class GolfScene extends Scene {
             zone === 'over'  ? COLORS.aimGuideOver  :
                                COLORS.aimGuideUnder;
 
+        // Base aim line: thin, runs the full pull distance so the
+        // player sees their current power directly.
         this.aimGfx.lineStyle(3, color, 0.95);
         this.aimGfx.beginPath();
         this.aimGfx.moveTo(bx, by);
         this.aimGfx.lineTo(endX, endY);
         this.aimGfx.strokePath();
 
-        const dotCount = 6;
-        for (let i = 1; i <= dotCount; i++) {
-            const t = i / (dotCount + 1);
-            const dx = bx + Math.cos(oscAngle) * clamped * t;
-            const dy = by + Math.sin(oscAngle) * clamped * t;
-            this.aimGfx.fillStyle(color, 0.7);
-            this.aimGfx.fillCircle(dx, dy, 2);
-        }
+        // SWEET BAND: a thick highlighted segment along the aim line
+        // showing exactly the range of pull distances that count as
+        // sweet zone. Release with the line ending inside this band.
+        const club = CLUBS[this.currentClub];
+        const sweetStart = club.sweetMin * SWING.maxDragPx;
+        const sweetEnd   = club.sweetMax * SWING.maxDragPx;
+        const sweetSx = bx + Math.cos(oscAngle) * sweetStart;
+        const sweetSy = by + Math.sin(oscAngle) * sweetStart;
+        const sweetEx = bx + Math.cos(oscAngle) * sweetEnd;
+        const sweetEy = by + Math.sin(oscAngle) * sweetEnd;
+        const bandPulse = 0.6 + 0.4 * Math.sin(this.time.now * 0.012);
+        const bandAlpha = zone === 'sweet' ? 0.75 + 0.2 * bandPulse : 0.45;
+        this.aimGfx.lineStyle(8, COLORS.aimGuideSweet, bandAlpha);
+        this.aimGfx.beginPath();
+        this.aimGfx.moveTo(sweetSx, sweetSy);
+        this.aimGfx.lineTo(sweetEx, sweetEy);
+        this.aimGfx.strokePath();
 
+        // Caps at each end of the sweet band, perpendicular to the
+        // aim line. Make the boundaries unmistakable.
         const perpX = -Math.sin(baseAngle);
         const perpY =  Math.cos(baseAngle);
-        const tickLen = 8;
-        this.aimGfx.lineStyle(2, COLORS.aimGuideSweet, 0.85);
-        for (const tFrac of [CLUBS[this.currentClub].sweetMin, CLUBS[this.currentClub].sweetMax]) {
-            const tx = bx + Math.cos(baseAngle) * tFrac * SWING.maxDragPx;
-            const ty = by + Math.sin(baseAngle) * tFrac * SWING.maxDragPx;
+        const capLen = 14;
+        this.aimGfx.lineStyle(3, COLORS.aimGuideSweet, 0.95);
+        this.aimGfx.beginPath();
+        this.aimGfx.moveTo(sweetSx - perpX * capLen, sweetSy - perpY * capLen);
+        this.aimGfx.lineTo(sweetSx + perpX * capLen, sweetSy + perpY * capLen);
+        this.aimGfx.moveTo(sweetEx - perpX * capLen, sweetEy - perpY * capLen);
+        this.aimGfx.lineTo(sweetEx + perpX * capLen, sweetEy + perpY * capLen);
+        this.aimGfx.strokePath();
+
+        // OVER-PULL warning: if the line extends past the sweet end,
+        // hatch the overflow segment in red so the over-zone is
+        // visible BEFORE you release.
+        if (zone === 'over') {
+            this.aimGfx.lineStyle(5, COLORS.aimGuideOver, 0.85);
             this.aimGfx.beginPath();
-            this.aimGfx.moveTo(tx - perpX * tickLen, ty - perpY * tickLen);
-            this.aimGfx.lineTo(tx + perpX * tickLen, ty + perpY * tickLen);
+            this.aimGfx.moveTo(sweetEx, sweetEy);
+            this.aimGfx.lineTo(endX, endY);
             this.aimGfx.strokePath();
         }
+
+        // Live power readout floating just off the ball.
+        const pct = Math.round(tNorm * 100);
+        if (!this.powerLabel) {
+            this.powerLabel = this.add.text(0, 0, '', {
+                fontFamily: 'system-ui, sans-serif',
+                fontSize: '14px',
+                color: '#FFF8E7',
+                fontStyle: 'bold',
+            }).setOrigin(0.5, 0.5).setDepth(510);
+            this.powerLabel.setStroke('#1A1A1A', 4);
+        }
+        this.powerLabel
+            .setVisible(true)
+            .setText(`${pct}%`)
+            .setColor(color === COLORS.aimGuideSweet ? '#73C47B'
+                : color === COLORS.aimGuideOver ? '#C8543A' : '#FFF8E7')
+            .setPosition(bx - perpX * 22, by - perpY * 22);
     }
 
     private drawTrail() {
@@ -1219,40 +1295,43 @@ export class GolfScene extends Scene {
         tNorm: number,
         holdMs: number,
         heckleApplied: number,
-    ): { label: string; color: string; isPure: boolean } {
+    ): { label: string; color: string; isPure: boolean; cause: string } {
         let score = 0;
+        const reasons: string[] = [];
 
         // Power zone is the biggest signal.
-        if (zone === 'sweet') score += 3;
-        else if (zone === 'over') score -= 2;
-        else score += tNorm > 0.5 ? 1 : -1;
+        if (zone === 'sweet') { score += 3; }
+        else if (zone === 'over') { score -= 2; reasons.push('over-pull'); }
+        else { score += tNorm > 0.5 ? 1 : -1; reasons.push('under power'); }
 
         // Hold-drift cost.
         const grace = SWING.holdGraceMs;
-        if (holdMs > grace + 1100) score -= 2;
-        else if (holdMs > grace + 400) score -= 1;
+        if (holdMs > grace + 1100) { score -= 2; reasons.push('held too long'); }
+        else if (holdMs > grace + 400) { score -= 1; reasons.push('slight hold drift'); }
 
         // Heckle interference.
-        if (heckleApplied >= 60) score -= 2;
-        else if (heckleApplied >= 25) score -= 1;
+        if (heckleApplied >= 60) { score -= 2; reasons.push('heckled hard'); }
+        else if (heckleApplied >= 25) { score -= 1; reasons.push('heckled'); }
+
+        const pct = Math.round(tNorm * 100);
 
         if (zone === 'sweet' && score >= 3) {
-            return { label: 'PURE', color: '#FFD56E', isPure: true };
+            return { label: 'PURE', color: '#FFD56E', isPure: true, cause: `${pct}% · sweet zone` };
         }
         if (zone === 'sweet') {
-            return { label: 'CLEAN', color: '#73C47B', isPure: false };
+            return { label: 'CLEAN', color: '#73C47B', isPure: false, cause: reasons[0] ?? `${pct}% · sweet zone` };
         }
         if (zone === 'under') {
             return score >= 0
-                ? { label: 'THIN',    color: '#E8922A', isPure: false }
-                : { label: 'FAT',     color: '#857060', isPure: false };
+                ? { label: 'THIN', color: '#E8922A', isPure: false, cause: `only ${pct}% power` }
+                : { label: 'FAT',  color: '#857060', isPure: false, cause: reasons.join(' · ') || `only ${pct}% power` };
         }
-        return { label: 'SHANKED', color: '#C8543A', isPure: false };
+        return { label: 'SHANKED', color: '#C8543A', isPure: false, cause: reasons.join(' · ') || `${pct}% · over-pull` };
     }
 
-    /** Pop a grade label at screen-center, fade in fast, fade out
-     *  slower. Pure contacts get a bigger initial scale. */
-    private showContactGrade(label: string, color: string, isPure: boolean) {
+    /** Pop a grade label at screen-center plus a one-line cause
+     *  subtitle so the player learns what drove the verdict. */
+    private showContactGrade(label: string, color: string, isPure: boolean, cause: string) {
         const w = this.scale.width;
         const h = this.scale.height;
         const startScale = isPure ? 1.6 : 1.1;
@@ -1265,6 +1344,14 @@ export class GolfScene extends Scene {
         text.setStroke('#1A1A1A', isPure ? 8 : 6);
         text.setShadow(0, 4, '#1A1A1A', 8, true, true);
 
+        const sub = this.add.text(w / 2, h * 0.42 + (isPure ? 36 : 28), cause, {
+            fontFamily: 'system-ui, sans-serif',
+            fontSize: '13px',
+            color: '#FFF8E7',
+            fontStyle: 'italic',
+        }).setOrigin(0.5).setScrollFactor(0).setDepth(1450).setAlpha(0);
+        sub.setStroke('#1A1A1A', 4);
+
         this.tweens.add({
             targets: text, alpha: 1, scale: 1,
             duration: 180, ease: 'Back.easeOut',
@@ -1273,10 +1360,21 @@ export class GolfScene extends Scene {
                     targets: text,
                     alpha: 0,
                     y: text.y - 30,
-                    delay: 380,
+                    delay: 480,
                     duration: 400,
                     ease: 'Cubic.easeIn',
                     onComplete: () => text.destroy(),
+                });
+            },
+        });
+        this.tweens.add({
+            targets: sub, alpha: 1,
+            delay: 100, duration: 200,
+            onComplete: () => {
+                this.tweens.add({
+                    targets: sub, alpha: 0,
+                    delay: 500, duration: 400,
+                    onComplete: () => sub.destroy(),
                 });
             },
         });
