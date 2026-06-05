@@ -9,7 +9,7 @@ import { EventBus } from '../EventBus';
 import { ambient, themeFor } from '../ambient';
 import {
     Terrain, TILE_PX, GRID_COLS, GRID_ROWS, WORLD_W, WORLD_H, PX_PER_YARD,
-    TEE_WORLD, HOLE_WORLD, ACTIVE_HOLE,
+    TEE_WORLD, HOLE_WORLD, ACTIVE_HOLE, activeHoleIndex,
     buildTerrainGrid, cornerPattern, allSame, anyIs, generateTreePositions, isOverWater,
 } from '../terrain';
 
@@ -92,6 +92,9 @@ export class GolfScene extends Scene {
     private armedHeckleLevel = 0;
     private waterHazardsThisHole = 0;
     private currentClub: ClubKey = 'iron';
+    private flagWavePhase = 0;
+    private ottieShadow?: Phaser.GameObjects.Ellipse;
+    private titleCard?: Phaser.GameObjects.Container;
 
     constructor() { super('GolfScene'); }
 
@@ -173,6 +176,11 @@ export class GolfScene extends Scene {
         // First-launch onboarding: drag-to-swing finger animation.
         this.maybeShowSwingHint();
 
+        // Course title card swoops in for the first 1.5 seconds of the
+        // hole. Frees the player from reading the HUD chip to know
+        // what they're looking at.
+        this.showCourseTitleCard();
+
         // Per-course ambient soundscape. iOS Safari blocks audio until
         // the first user gesture; we start the engine here anyway and
         // let the AudioContext stay suspended until pointerdown bumps
@@ -193,14 +201,31 @@ export class GolfScene extends Scene {
         });
     }
 
-    update(_t: number, _dt: number) {
+    update(_t: number, dt: number) {
         const bx = this.ballBody.position.x;
         const by = this.ballBody.position.y;
         this.ballSprite.setPosition(bx, by);
         this.ballShadow.setPosition(bx + 1, by + 3);
 
+        // Flag wave: phase advances every frame, redraw once.
+        this.flagWavePhase += dt * 0.005;
+        this.redrawFlag(this.flagWavePhase);
+
         if (this.state === 'IN_FLIGHT' && !this.holeSunk) {
             this.trail.push({ x: bx, y: by, t: this.time.now });
+            // Motion stretch: slightly elongate the ball along its
+            // velocity direction so fast shots feel fast. Reset to
+            // round when the ball is moving slowly or at rest.
+            const v = (this.ballBody as unknown as { velocity: { x: number; y: number } }).velocity;
+            const speed = Math.hypot(v.x, v.y);
+            const stretch = Math.min(1.5, 1 + speed * 0.045);
+            const squash = 1 / Math.sqrt(stretch);
+            const angle = Math.atan2(v.y, v.x);
+            this.ballSprite.setRotation(angle);
+            this.ballSprite.setScale(stretch, squash);
+        } else {
+            this.ballSprite.setRotation(0);
+            this.ballSprite.setScale(1, 1);
         }
         this.drawTrail();
 
@@ -419,21 +444,107 @@ export class GolfScene extends Scene {
             ease: 'Sine.easeInOut',
         });
 
-        // Cup
+        // Cup with depth. Outer light-tan rim simulates the cut grass
+        // collar around the cup, then the dark hole sits inside it.
+        this.add.circle(HOLE_WORLD.x, HOLE_WORLD.y, COURSE.holeRadius + 2, 0xC9D9A8, 1).setDepth(9.5);
         this.add.circle(HOLE_WORLD.x, HOLE_WORLD.y, COURSE.holeRadius, COLORS.hole, 1).setDepth(10);
-        // Flag pole + flag
+        // Inner highlight crescent to suggest the cup's curved lip.
+        const lip = this.add.graphics().setDepth(10.1);
+        lip.fillStyle(0x2A2A2A, 1);
+        lip.fillCircle(HOLE_WORLD.x, HOLE_WORLD.y + 2, COURSE.holeRadius - 2);
+
+        // Flag pole + flag. Stored as a member so update() can redraw
+        // the flag each frame with a wave offset.
         this.flagSprite = this.add.graphics().setDepth(11);
-        this.flagSprite.lineStyle(2, 0xF0EAD2, 1);
-        this.flagSprite.beginPath();
-        this.flagSprite.moveTo(HOLE_WORLD.x, HOLE_WORLD.y);
-        this.flagSprite.lineTo(HOLE_WORLD.x, HOLE_WORLD.y - 28);
-        this.flagSprite.strokePath();
-        this.flagSprite.fillStyle(0xC8543A, 1);
-        this.flagSprite.fillTriangle(
-            HOLE_WORLD.x, HOLE_WORLD.y - 28,
-            HOLE_WORLD.x + 16, HOLE_WORLD.y - 24,
-            HOLE_WORLD.x, HOLE_WORLD.y - 18,
+        this.redrawFlag(0);
+    }
+
+    /** Redraw the flag pole and triangular cloth with a phase-based
+     *  wave so the cloth swims gently as if caught by wind. */
+    private redrawFlag(phase: number) {
+        if (!this.flagSprite) return;
+        const g = this.flagSprite;
+        const px = HOLE_WORLD.x;
+        const py = HOLE_WORLD.y;
+        const tipY = py - 28;
+        const baseRightX = px + 16;
+        const swayX = Math.sin(phase) * 3;
+        const swayY = Math.sin(phase * 1.3 + 0.5) * 1.5;
+
+        g.clear();
+        // Pole shadow
+        g.lineStyle(2, 0x000000, 0.25);
+        g.beginPath();
+        g.moveTo(px + 1, py + 1);
+        g.lineTo(px + 1, tipY + 1);
+        g.strokePath();
+        // Pole
+        g.lineStyle(2, 0xF0EAD2, 1);
+        g.beginPath();
+        g.moveTo(px, py);
+        g.lineTo(px, tipY);
+        g.strokePath();
+        // Flag cloth, right corner sways
+        g.fillStyle(0xC8543A, 1);
+        g.fillTriangle(
+            px, tipY,
+            baseRightX + swayX, tipY + 4 + swayY,
+            px, tipY + 10,
         );
+        // Cloth highlight along the pole side
+        g.fillStyle(0xE07555, 0.8);
+        g.fillTriangle(
+            px + 1, tipY + 1,
+            px + 4 + swayX * 0.3, tipY + 4 + swayY * 0.3,
+            px + 1, tipY + 8,
+        );
+    }
+
+    /** Big translucent course title card centered on the screen for
+     *  the first ~1.6 seconds of a hole. 'HOLE 1 · THE ROAD HOLE · PAR 4' */
+    private showCourseTitleCard() {
+        const w = this.scale.width;
+        const h = this.scale.height;
+        const cy = h * 0.42;
+        const c = this.add.container(0, 0).setDepth(1400).setScrollFactor(0).setAlpha(0);
+
+        const eyebrow = this.add.text(w / 2, cy - 22, `HOLE ${this.holeNumber()} OF 3`, {
+            fontFamily: 'system-ui, sans-serif', fontSize: '11px',
+            color: '#E8922A', fontStyle: 'bold',
+        }).setOrigin(0.5).setScrollFactor(0);
+        eyebrow.setStroke('#1A1A1A', 4);
+
+        const title = this.add.text(w / 2, cy + 4, ACTIVE_HOLE.name, {
+            fontFamily: 'system-ui, sans-serif', fontSize: '34px',
+            color: '#FFF8E7', fontStyle: 'bold',
+        }).setOrigin(0.5).setScrollFactor(0);
+        title.setStroke('#1A1A1A', 6);
+        title.setShadow(0, 3, '#1A1A1A', 6, true, true);
+
+        const sub = this.add.text(w / 2, cy + 40, `par ${ACTIVE_HOLE.par} · after ${ACTIVE_HOLE.inspiration}`, {
+            fontFamily: 'system-ui, sans-serif', fontSize: '13px',
+            color: '#FFF8E7', fontStyle: 'italic',
+        }).setOrigin(0.5).setScrollFactor(0);
+        sub.setStroke('#1A1A1A', 4);
+
+        c.add([eyebrow, title, sub]);
+        this.titleCard = c;
+
+        this.tweens.add({
+            targets: c, alpha: 1, y: -8,
+            duration: 280, ease: 'Cubic.easeOut',
+            onComplete: () => {
+                this.tweens.add({
+                    targets: c, alpha: 0, y: -16,
+                    delay: 1200, duration: 400, ease: 'Cubic.easeIn',
+                    onComplete: () => { c.destroy(); this.titleCard = undefined; },
+                });
+            },
+        });
+    }
+
+    private holeNumber(): number {
+        return activeHoleIndex() + 1;
     }
 
     private drawAimHint() {
@@ -654,8 +765,11 @@ export class GolfScene extends Scene {
     }
 
     private placeOttie() {
+        const ox = TEE_WORLD.x - 22;
+        const oy = TEE_WORLD.y - 4;
+        this.ottieShadow = this.add.ellipse(ox, oy + 2, 22, 6, 0x000000, 0.28).setDepth(14);
         this.ottie = this.add.image(
-            TEE_WORLD.x - 22, TEE_WORLD.y - 4,
+            ox, oy,
             TEX.ottie,
         ).setOrigin(0.5, 0.85).setDepth(15).setScale(0.3);
         this.startOttieIdleBob();
@@ -663,13 +777,15 @@ export class GolfScene extends Scene {
 
     /** Move Ottie to stand next to the ball at the given world position.
      *  Tween for normal post-shot transitions; immediate for tee respawns
-     *  (water/OOB) since a slow walk across water reads weird. */
+     *  (water/OOB) since a slow walk across water reads weird. The drop
+     *  shadow tweens in parallel so it stays glued to his feet. */
     private moveOttieToBall(ballX: number, ballY: number, immediate = false) {
         const tx = ballX - 22;
         const ty = ballY - 4;
         this.stopOttieIdleBob();
         if (immediate) {
             this.ottie.setPosition(tx, ty);
+            this.ottieShadow?.setPosition(tx, ty + 2);
             this.startOttieIdleBob();
             return;
         }
@@ -680,6 +796,14 @@ export class GolfScene extends Scene {
             ease: 'Sine.easeInOut',
             onComplete: () => this.startOttieIdleBob(),
         });
+        if (this.ottieShadow) {
+            this.tweens.add({
+                targets: this.ottieShadow,
+                x: tx, y: ty + 2,
+                duration: 550,
+                ease: 'Sine.easeInOut',
+            });
+        }
     }
 
     private placeBall() {
@@ -900,6 +1024,7 @@ export class GolfScene extends Scene {
         this.strokes += 1;
         this.haptic([18]);
         this.sfx(SFX.swing, 0.55);
+        this.spawnSwingDust(this.ballBody.position.x, this.ballBody.position.y, finalAngle);
         EventBus.emit('strokes-changed', this.strokes);
         this.stopOttieIdleBob();
         this.ottie.setTexture(TEX.ottieSwing);
@@ -1061,6 +1186,30 @@ export class GolfScene extends Scene {
             this.spawnConfetti(cx, cy, 8, 0.65);
         }
         // Bogey or worse: no celebration (the verdict speaks for itself)
+    }
+
+    /** Small dust puff behind the ball at swing release. Sells the
+     *  'whump' of contact and gives the ball a sense of leaving
+     *  something behind. */
+    private spawnSwingDust(cx: number, cy: number, angle: number) {
+        const back = angle + Math.PI;
+        for (let i = 0; i < 6; i++) {
+            const spread = (Math.random() - 0.5) * 0.9;
+            const a = back + spread;
+            const dist = 6 + Math.random() * 14;
+            const size = 3 + Math.random() * 4;
+            const puff = this.add.circle(cx, cy, size, 0xFFF8E7, 0.7).setDepth(19);
+            this.tweens.add({
+                targets: puff,
+                x: cx + Math.cos(a) * dist,
+                y: cy + Math.sin(a) * dist,
+                alpha: 0,
+                scale: { from: 1, to: 0.4 },
+                duration: 320 + Math.random() * 180,
+                ease: 'Quad.easeOut',
+                onComplete: () => puff.destroy(),
+            });
+        }
     }
 
     private spawnConfetti(cx: number, cy: number, count: number, intensity: number) {
