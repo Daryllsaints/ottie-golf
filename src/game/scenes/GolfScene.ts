@@ -95,6 +95,10 @@ export class GolfScene extends Scene {
     private flagWavePhase = 0;
     private ottieShadow?: Phaser.GameObjects.Ellipse;
     private titleCard?: Phaser.GameObjects.Container;
+    private edgeWarning?: Phaser.GameObjects.Graphics;
+    private edgeWarningPhase = 0;
+    private ottieIdleAnchor = { x: 0, y: 0 };
+    private heckleInterferedLastShot = false;
 
     constructor() { super('GolfScene'); }
 
@@ -229,7 +233,11 @@ export class GolfScene extends Scene {
         }
         this.drawTrail();
 
-        if (this.state === 'AIMING') this.drawAimGuide();
+        if (this.state === 'AIMING') {
+            this.drawAimGuide();
+            const holdMs = this.time.now - this.dragStartMs;
+            this.updateBadMomentTelegraph(holdMs);
+        }
 
         if (this.oobIndicator && this.time.now > this.oobIndicatorHideAt) {
             this.oobIndicator.destroy();
@@ -772,6 +780,7 @@ export class GolfScene extends Scene {
             ox, oy,
             TEX.ottie,
         ).setOrigin(0.5, 0.85).setDepth(15).setScale(0.3);
+        this.ottieIdleAnchor = { x: ox, y: oy };
         this.startOttieIdleBob();
     }
 
@@ -782,6 +791,7 @@ export class GolfScene extends Scene {
     private moveOttieToBall(ballX: number, ballY: number, immediate = false) {
         const tx = ballX - 22;
         const ty = ballY - 4;
+        this.ottieIdleAnchor = { x: tx, y: ty };
         this.stopOttieIdleBob();
         if (immediate) {
             this.ottie.setPosition(tx, ty);
@@ -918,6 +928,7 @@ export class GolfScene extends Scene {
             if (this.state === 'AIMING') {
                 this.state = 'IDLE';
                 this.aimGfx.clear();
+                this.clearEdgeWarning();
                 this.drawAimHint();
             }
             this.panActive = true;
@@ -982,6 +993,7 @@ export class GolfScene extends Scene {
 
         if (pullMag < SWING.minDragPx) {
             this.state = 'IDLE';
+            this.clearEdgeWarning();
             this.drawAimHint();
             return;
         }
@@ -1007,7 +1019,9 @@ export class GolfScene extends Scene {
         // Heckle handicap: aim jitter proportional to opponent's mash
         // intensity. 100% heckle = up to 12 degrees of release wobble.
         // Applied once and then disarmed so it never carries to a later shot.
+        let heckleAppliedAmount = 0;
         if (this.armedHeckleLevel > 0) {
+            heckleAppliedAmount = this.armedHeckleLevel;
             const maxDeg = (this.armedHeckleLevel / 100) * 12;
             const heckleJitterRad = (Math.random() - 0.5) * 2 * maxDeg * Math.PI / 180;
             finalAngle += heckleJitterRad;
@@ -1020,15 +1034,23 @@ export class GolfScene extends Scene {
             { x: Math.cos(finalAngle) * speed, y: Math.sin(finalAngle) * speed },
         );
 
+        // Grade the contact and pop the verdict label. PURE shots
+        // earn the slow-mo zoom-punch beat.
+        const holdMs = this.time.now - this.dragStartMs;
+        const grade = this.gradeContact(zone, tNorm, holdMs, heckleAppliedAmount);
+        this.showContactGrade(grade.label, grade.color, grade.isPure);
+        if (grade.isPure) this.applyPureContactEffect();
+
         this.state = 'IN_FLIGHT';
         this.strokes += 1;
-        this.haptic([18]);
-        this.sfx(SFX.swing, 0.55);
+        this.haptic(grade.isPure ? [22, 30, 40] : [18]);
+        this.sfx(SFX.swing, grade.isPure ? 0.75 : 0.55);
         this.spawnSwingDust(this.ballBody.position.x, this.ballBody.position.y, finalAngle);
         EventBus.emit('strokes-changed', this.strokes);
         this.stopOttieIdleBob();
         this.ottie.setTexture(TEX.ottieSwing);
         this.aimHintGfx.clear();
+        this.clearEdgeWarning();
         this.zoomToFollow();
     }
 
@@ -1186,6 +1208,164 @@ export class GolfScene extends Scene {
             this.spawnConfetti(cx, cy, 8, 0.65);
         }
         // Bogey or worse: no celebration (the verdict speaks for itself)
+    }
+
+    // ─── Contact grading + cinematic shot moments ────────────────
+
+    /** Five-step contact quality used to pop a grade label and decide
+     *  whether the shot earns the PURE cinematic treatment. */
+    private gradeContact(
+        zone: 'under' | 'sweet' | 'over',
+        tNorm: number,
+        holdMs: number,
+        heckleApplied: number,
+    ): { label: string; color: string; isPure: boolean } {
+        let score = 0;
+
+        // Power zone is the biggest signal.
+        if (zone === 'sweet') score += 3;
+        else if (zone === 'over') score -= 2;
+        else score += tNorm > 0.5 ? 1 : -1;
+
+        // Hold-drift cost.
+        const grace = SWING.holdGraceMs;
+        if (holdMs > grace + 1100) score -= 2;
+        else if (holdMs > grace + 400) score -= 1;
+
+        // Heckle interference.
+        if (heckleApplied >= 60) score -= 2;
+        else if (heckleApplied >= 25) score -= 1;
+
+        if (zone === 'sweet' && score >= 3) {
+            return { label: 'PURE', color: '#FFD56E', isPure: true };
+        }
+        if (zone === 'sweet') {
+            return { label: 'CLEAN', color: '#73C47B', isPure: false };
+        }
+        if (zone === 'under') {
+            return score >= 0
+                ? { label: 'THIN',    color: '#E8922A', isPure: false }
+                : { label: 'FAT',     color: '#857060', isPure: false };
+        }
+        return { label: 'SHANKED', color: '#C8543A', isPure: false };
+    }
+
+    /** Pop a grade label at screen-center, fade in fast, fade out
+     *  slower. Pure contacts get a bigger initial scale. */
+    private showContactGrade(label: string, color: string, isPure: boolean) {
+        const w = this.scale.width;
+        const h = this.scale.height;
+        const startScale = isPure ? 1.6 : 1.1;
+        const text = this.add.text(w / 2, h * 0.42, label, {
+            fontFamily: 'system-ui, sans-serif',
+            fontSize: isPure ? '46px' : '34px',
+            color, fontStyle: 'bold',
+        }).setOrigin(0.5).setScrollFactor(0).setDepth(1450)
+            .setAlpha(0).setScale(startScale);
+        text.setStroke('#1A1A1A', isPure ? 8 : 6);
+        text.setShadow(0, 4, '#1A1A1A', 8, true, true);
+
+        this.tweens.add({
+            targets: text, alpha: 1, scale: 1,
+            duration: 180, ease: 'Back.easeOut',
+            onComplete: () => {
+                this.tweens.add({
+                    targets: text,
+                    alpha: 0,
+                    y: text.y - 30,
+                    delay: 380,
+                    duration: 400,
+                    ease: 'Cubic.easeIn',
+                    onComplete: () => text.destroy(),
+                });
+            },
+        });
+    }
+
+    /** Cinematic micro-beat for PURE contacts. Drops time scale to
+     *  0.35 for ~260ms (engine + scene), zoom-punches the camera 8%
+     *  in then back, and brightens the ball trail. */
+    private applyPureContactEffect() {
+        const cam = this.cameras.main;
+        const baseZoom = cam.zoom;
+        const physWorld = this.matter.world as unknown as { engine: { timing: { timeScale: number } } };
+        const baseEngineTs = physWorld.engine.timing.timeScale;
+        const baseSceneTs = this.time.timeScale;
+
+        this.time.timeScale = 0.35;
+        physWorld.engine.timing.timeScale = 0.35;
+        cam.zoomTo(baseZoom * 1.08, 110, 'Cubic.easeOut');
+
+        // Real-time wall clock for restoration so timeScale=0.35 does
+        // not delay our own restore call.
+        window.setTimeout(() => {
+            this.time.timeScale = baseSceneTs;
+            physWorld.engine.timing.timeScale = baseEngineTs;
+            cam.zoomTo(baseZoom, 160, 'Cubic.easeOut');
+        }, 260);
+
+        // Brief flash on the ball itself for the strike pop.
+        const flash = this.add.circle(
+            this.ballBody.position.x, this.ballBody.position.y,
+            14, 0xFFD56E, 0.85,
+        ).setDepth(20);
+        this.tweens.add({
+            targets: flash, scale: 2.4, alpha: 0,
+            duration: 280, ease: 'Quad.easeOut',
+            onComplete: () => flash.destroy(),
+        });
+    }
+
+    /** Telegraph the bad-moment. When the player is holding past the
+     *  grace window, draw a pulsing red vignette on the screen edge
+     *  and jitter Ottie's stance. Both effects scale with how far
+     *  past the grace window we are. */
+    private updateBadMomentTelegraph(holdMs: number) {
+        const grace = SWING.holdGraceMs;
+        if (holdMs <= grace) {
+            this.clearEdgeWarning();
+            return;
+        }
+        const over = holdMs - grace;
+        const intensity = Math.min(1, over / 1400);
+        this.edgeWarningPhase += 0.18;
+        const pulse = 0.5 + 0.5 * Math.sin(this.edgeWarningPhase);
+        const alpha = intensity * (0.35 + 0.25 * pulse);
+
+        if (!this.edgeWarning) {
+            this.edgeWarning = this.add.graphics().setDepth(1300).setScrollFactor(0);
+        }
+        const w = this.scale.width;
+        const h = this.scale.height;
+        const band = 28 + 16 * intensity;
+        this.edgeWarning.clear();
+        this.edgeWarning.fillStyle(0xC8543A, alpha);
+        this.edgeWarning.fillRect(0, 0, w, band);
+        this.edgeWarning.fillRect(0, h - band, w, band);
+        this.edgeWarning.fillRect(0, 0, band, h);
+        this.edgeWarning.fillRect(w - band, 0, band, h);
+
+        // Ottie nervous jitter rises with intensity.
+        if (this.ottie) {
+            const j = 1.5 * intensity;
+            this.ottie.setPosition(
+                this.ottieIdleAnchor.x + (Math.random() - 0.5) * 2 * j,
+                this.ottieIdleAnchor.y + (Math.random() - 0.5) * 2 * j,
+            );
+        }
+    }
+
+    private clearEdgeWarning() {
+        if (this.edgeWarning) {
+            this.edgeWarning.clear();
+            this.edgeWarning.destroy();
+            this.edgeWarning = undefined;
+        }
+        // Snap Ottie back to his idle anchor so the jitter does not
+        // linger after the player releases.
+        if (this.ottie && this.ottieIdleAnchor.x !== 0) {
+            this.ottie.setPosition(this.ottieIdleAnchor.x, this.ottieIdleAnchor.y);
+        }
     }
 
     /** Small dust puff behind the ball at swing release. Sells the
