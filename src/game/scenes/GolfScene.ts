@@ -737,23 +737,39 @@ export class GolfScene extends Scene {
         cam.startFollow(this.ballSprite, true, 0.1, 0.1);
     }
 
-    /** Briefly focus the camera on Ottie at swing release so the
-     *  player sees the swing pose, then hand off to ball-follow.
-     *  ~340ms total: 140ms pan-in + 200ms hold on Ottie. The ball is
-     *  in flight during this window so the hand-off is smooth. */
+    /** Cinematic swing focus: glide in on Ottie so the player sees
+     *  the pose and the grade label, hold long enough to read, then
+     *  smoothly hand off to ball-follow. Total ~1.05s before the
+     *  ball-follow is engaged; the smooth easing makes it feel
+     *  intentional rather than a cut. */
     private focusOnOttieThenBall() {
         const cam = this.cameras.main;
         cam.stopFollow();
         cam.removeBounds();
         cam.setSize(this.scale.width, this.scale.height);
         const ox = this.ottie.x;
-        const oy = this.ottie.y;
-        cam.zoomTo(1.4, 140, 'Cubic.easeOut');
-        cam.pan(ox, oy, 140, 'Cubic.easeOut');
-        this.time.delayedCall(280, () => {
+        const oy = this.ottie.y - 6;
+        // Phase 1: glide in to Ottie (340ms, soft ease).
+        cam.zoomTo(1.45, 340, 'Sine.easeInOut');
+        cam.pan(ox, oy, 340, 'Sine.easeInOut');
+        // Phase 2: hold on Ottie (340ms). The grade label is at peak
+        // alpha during this window so the player reads the verdict
+        // before the camera moves.
+        this.time.delayedCall(680, () => {
             if (this.state !== 'IN_FLIGHT') return;
-            cam.zoomTo(1.0, 260, 'Sine.easeInOut');
-            cam.startFollow(this.ballSprite, true, 0.1, 0.1);
+            // Phase 3: glide out to ball-follow (520ms). Pan ahead of
+            // the ball's current position before engaging follow so
+            // the cam catches up smoothly rather than snapping.
+            cam.zoomTo(1.0, 520, 'Sine.easeInOut');
+            cam.pan(
+                this.ballBody.position.x,
+                this.ballBody.position.y,
+                520, 'Sine.easeInOut',
+            );
+            this.time.delayedCall(420, () => {
+                if (this.state !== 'IN_FLIGHT') return;
+                cam.startFollow(this.ballSprite, true, 0.08, 0.08);
+            });
         });
     }
 
@@ -1077,17 +1093,19 @@ export class GolfScene extends Scene {
         this.focusOnOttieThenBall();
     }
 
-    /** Quick scale-pulse on Ottie at the moment of release so the
-     *  static swing sprite gets some life. Mid-pulse the camera is
-     *  already focused on him via focusOnOttieThenBall(). */
+    /** Soft scale pulse on Ottie at swing release, paced to match
+     *  the camera focus window so the avatar 'breathes' with the
+     *  zoom-in rather than snapping. */
     private playOttieSwingAnim() {
         const baseScale = 0.3;
         this.tweens.killTweensOf(this.ottie);
         this.tweens.add({
             targets: this.ottie,
-            scale: { from: baseScale * 1.18, to: baseScale },
-            duration: 280,
-            ease: 'Back.easeOut',
+            scale: { from: baseScale, to: baseScale * 1.15 },
+            duration: 240,
+            ease: 'Sine.easeOut',
+            yoyo: true,
+            hold: 120,
         });
     }
 
