@@ -3,8 +3,10 @@ import { IRefPhaserGame, PhaserGame } from './PhaserGame';
 import { HUD } from './ui/HUD';
 import { MenuScreen } from './ui/MenuScreen';
 import { ShareCard } from './ui/ShareCard';
+import { ClubPicker } from './ui/ClubPicker';
 import { EventBus } from './game/EventBus';
-import { currentHoleForPlayer, joinOrLoadMatch, loadShots, markMatchCompleteIfDone, pendingHeckleFor, rememberMatch, saveShot, type Match, type Shot } from './lib/match';
+import { currentHoleForPlayer, joinOrLoadMatch, lastClub, loadShots, markMatchCompleteIfDone, pendingHeckleFor, rememberClub, rememberMatch, saveShot, type Match, type Shot } from './lib/match';
+import type { ClubKey } from './game/constants';
 import { ACTIVE_HOLE, HOLES, setHoleIndex, activeHoleIndex } from './game/terrain';
 
 type Route =
@@ -35,7 +37,22 @@ function App() {
     const [holeIdx, setHoleIdx] = useState(0);
     const [matchComplete, setMatchComplete] = useState(false);
     const [recap, setRecap] = useState<null | { prevName: string; nextName: string; nextPar: number; me: number; opp: number; nextNum: number }>(null);
+    const [club, setClub] = useState<ClubKey>(() => lastClub());
     const pendingHeckleCommitRef = useRef(0);
+
+    // Keep the scene's idea of the current club in sync with React state.
+    useEffect(() => {
+        rememberClub(club);
+        EventBus.emit('club-changed', club);
+    }, [club]);
+
+    // Re-broadcast on scene-ready so a freshly-restarted scene picks up
+    // the persisted club selection.
+    useEffect(() => {
+        const handler = () => EventBus.emit('club-changed', club);
+        EventBus.on('current-scene-ready', handler);
+        return () => { EventBus.removeListener('current-scene-ready', handler); };
+    }, [club]);
 
     function restartSceneForHole(nextIdx: number) {
         setHoleIndex(nextIdx);
@@ -183,6 +200,7 @@ function App() {
                     opponentName={opponentName}
                 />
             )}
+            <ClubPicker current={club} onChange={setClub} />
             {showHeckleToast && (
                 <div style={heckleBackdropStyle}>
                     <div style={{ ...heckleCardStyle, animation: 'ottieHecklePop 280ms ease-out' }}>

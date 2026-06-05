@@ -105,6 +105,43 @@ export const HOLE_1 = {
   ],
 } as const
 
+export type ClubKey = 'driver' | 'iron' | 'wedge';
+
+export type Club = {
+  key: ClubKey;
+  name: string;
+  short: string;
+  maxSpeed: number;
+  sweetMin: number;
+  sweetMax: number;
+  overpowerPenalty: number;
+  overpowerJitterDeg: number;
+  tooltip: string;
+};
+
+export const CLUBS: Record<ClubKey, Club> = {
+  driver: {
+    key: 'driver', name: 'Driver', short: 'DR',
+    maxSpeed: 22, sweetMin: 0.62, sweetMax: 0.90,
+    overpowerPenalty: 0.75, overpowerJitterDeg: 4,
+    tooltip: 'longest range, less forgiving. use it off the tee on a long hole when you need the distance.',
+  },
+  iron: {
+    key: 'iron', name: 'Iron', short: 'IR',
+    maxSpeed: 18, sweetMin: 0.65, sweetMax: 0.95,
+    overpowerPenalty: 0.82, overpowerJitterDeg: 2.5,
+    tooltip: 'balanced range and accuracy. the all-purpose default. good from the fairway.',
+  },
+  wedge: {
+    key: 'wedge', name: 'Wedge', short: 'WG',
+    maxSpeed: 12, sweetMin: 0.70, sweetMax: 0.95,
+    overpowerPenalty: 0.90, overpowerJitterDeg: 1.2,
+    tooltip: 'short range, very accurate. approach shots to a tight green, recoveries from bunkers.',
+  },
+};
+
+export const CLUB_ORDER: ClubKey[] = ['driver', 'iron', 'wedge'];
+
 export const SWING = {
   // Generous hit radius — at the zoomed-out overview camera, ball
   // renders at half-size; this keeps finger taps forgiving.

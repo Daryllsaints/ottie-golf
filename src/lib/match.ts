@@ -8,6 +8,20 @@ const SESSION_KEY = 'ottiegolf:sessionId';
 const NAME_KEY = 'ottiegolf:name';
 const SEEN_MATCHES_KEY = 'ottiegolf:seenMatches';
 const MAX_SEEN_MATCHES = 10;
+const CLUB_KEY = 'ottiegolf:club';
+
+/** Read the last-used club key from localStorage. */
+export function lastClub(): 'driver' | 'iron' | 'wedge' {
+    try {
+        const raw = window.localStorage.getItem(CLUB_KEY);
+        if (raw === 'driver' || raw === 'iron' || raw === 'wedge') return raw;
+    } catch { /* ignore */ }
+    return 'iron';
+}
+
+export function rememberClub(key: string): void {
+    try { window.localStorage.setItem(CLUB_KEY, key); } catch { /* ignore */ }
+}
 
 export type Match = {
     id: string;

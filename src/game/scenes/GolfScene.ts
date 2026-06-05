@@ -4,7 +4,7 @@
 // Camera follows the ball.
 
 import { Scene } from 'phaser';
-import { SWING, BALL_PHYSICS, COLORS, COURSE } from '../constants';
+import { SWING, BALL_PHYSICS, COLORS, COURSE, CLUBS, type ClubKey } from '../constants';
 import { EventBus } from '../EventBus';
 import { ambient, themeFor } from '../ambient';
 import {
@@ -91,6 +91,7 @@ export class GolfScene extends Scene {
     private firstShotTaken = false;
     private armedHeckleLevel = 0;
     private waterHazardsThisHole = 0;
+    private currentClub: ClubKey = 'iron';
 
     constructor() { super('GolfScene'); }
 
@@ -187,6 +188,9 @@ export class GolfScene extends Scene {
             this.armedHeckleLevel = Math.max(0, Math.min(100, level));
         });
         EventBus.on('heckle-sfx', () => this.sfx(SFX.heckle, 0.7));
+        EventBus.on('club-changed', (key: ClubKey) => {
+            this.currentClub = key;
+        });
     }
 
     update(_t: number, _dt: number) {
@@ -727,8 +731,9 @@ export class GolfScene extends Scene {
     }
 
     private powerZone(tNorm: number): 'under' | 'sweet' | 'over' {
-        if (tNorm < SWING.sweetSpotMin) return 'under';
-        if (tNorm <= SWING.sweetSpotMax) return 'sweet';
+        const club = CLUBS[this.currentClub];
+        if (tNorm < club.sweetMin) return 'under';
+        if (tNorm <= club.sweetMax) return 'sweet';
         return 'over';
     }
 
@@ -870,8 +875,8 @@ export class GolfScene extends Scene {
         } else if (zone === 'under') {
             powerMul = tNorm;
         } else {
-            powerMul = SWING.overpowerPenalty;
-            const jitterRad = (Math.random() - 0.5) * 2 * SWING.overpowerJitterDeg * Math.PI / 180;
+            powerMul = CLUBS[this.currentClub].overpowerPenalty;
+            const jitterRad = (Math.random() - 0.5) * 2 * CLUBS[this.currentClub].overpowerJitterDeg * Math.PI / 180;
             finalAngle += jitterRad;
         }
 
@@ -885,7 +890,7 @@ export class GolfScene extends Scene {
             this.armedHeckleLevel = 0;
         }
 
-        const speed = powerMul * SWING.maxSpeed;
+        const speed = powerMul * CLUBS[this.currentClub].maxSpeed;
         this.matter.body.setVelocity(
             this.ballBody as unknown as MatterJS.BodyType,
             { x: Math.cos(finalAngle) * speed, y: Math.sin(finalAngle) * speed },
@@ -948,7 +953,7 @@ export class GolfScene extends Scene {
         const perpY =  Math.cos(baseAngle);
         const tickLen = 8;
         this.aimGfx.lineStyle(2, COLORS.aimGuideSweet, 0.85);
-        for (const tFrac of [SWING.sweetSpotMin, SWING.sweetSpotMax]) {
+        for (const tFrac of [CLUBS[this.currentClub].sweetMin, CLUBS[this.currentClub].sweetMax]) {
             const tx = bx + Math.cos(baseAngle) * tFrac * SWING.maxDragPx;
             const ty = by + Math.sin(baseAngle) * tFrac * SWING.maxDragPx;
             this.aimGfx.beginPath();
