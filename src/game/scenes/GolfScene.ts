@@ -743,14 +743,27 @@ export class GolfScene extends Scene {
         return { x: sx / active.length, y: sy / active.length };
     }
 
-    /** Keep the camera's center inside the world rect so the user can't
-     *  pan into empty space and lose the course off-screen. */
+    /** Keep the WORLD inside the viewport so no body background bleeds
+     *  in around the edges. Two cases per axis:
+     *  - viewport in world units (= scale / zoom) is SMALLER than the
+     *    world: clamp scroll to [0, WORLD - viewport] so neither edge
+     *    leaks past the world rect.
+     *  - viewport is LARGER than the world (cover-zoom on portrait
+     *    phones can leave one axis larger): center the world. */
     private clampPan() {
         const cam = this.cameras.main;
-        const halfW = this.scale.width  / cam.zoom / 2;
-        const halfH = this.scale.height / cam.zoom / 2;
-        cam.scrollX = Math.max(-halfW, Math.min(WORLD_W - halfW, cam.scrollX));
-        cam.scrollY = Math.max(-halfH, Math.min(WORLD_H - halfH, cam.scrollY));
+        const viewW = this.scale.width  / cam.zoom;
+        const viewH = this.scale.height / cam.zoom;
+        if (viewW >= WORLD_W) {
+            cam.scrollX = (WORLD_W - viewW) / 2;
+        } else {
+            cam.scrollX = Math.max(0, Math.min(WORLD_W - viewW, cam.scrollX));
+        }
+        if (viewH >= WORLD_H) {
+            cam.scrollY = (WORLD_H - viewH) / 2;
+        } else {
+            cam.scrollY = Math.max(0, Math.min(WORLD_H - viewH, cam.scrollY));
+        }
     }
 
     private onPointerDown(p: Phaser.Input.Pointer) {

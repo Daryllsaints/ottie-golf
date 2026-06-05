@@ -63,6 +63,15 @@ const sawgrass17: HoleSpec = (() => {
     };
 })();
 
+// Smoothstep: cubic Hermite curve (3t^2 - 2t^3) clamped to [0,1].
+// Continuous in value AND first derivative, so any path interpolated
+// through it never produces the slope-kink artifact that linear lerp
+// produces at segment joins.
+function smoothstep01(t: number): number {
+    const x = Math.max(0, Math.min(1, t));
+    return x * x * (3 - 2 * x);
+}
+
 // Hole 2: Pebble Beach #7. Famous tiny green at the edge of the
 // Pacific cliff, ringed by bunkers. Ocean wraps the right and back
 // of the green so a fade or pulled shot dies on the rocks.
@@ -93,11 +102,13 @@ const pebble7: HoleSpec = (() => {
             if (Math.hypot((col - 14) / 0.6, (row - 7) / 0.7)  < 1.1) return 'sand';
             if (Math.hypot((col - 11) / 0.8, (row - 4) / 0.5)  < 1.0) return 'sand';
 
-            // Fairway corridor: gentle curve from tee (lower-left) toward
-            // the green (upper-mid). Width 2.5 cells.
-            const tNorm = Math.max(0, Math.min(1, (ROWS - row) / (ROWS - HOLE.row)));
-            const fairwayCol = TEE.col + (HOLE.col - TEE.col) * tNorm;
-            if (Math.abs(col - fairwayCol) < 2.5 && row > HOLE.row + 2 && row < ROWS - 1) return 'fairway';
+            // Fairway corridor smoothed via smoothstep so the curve has
+            // continuous slope and the edges read as a flowing river of
+            // grass instead of a kinked polyline.
+            const tNorm = (ROWS - row) / (ROWS - HOLE.row);
+            const s = smoothstep01(tNorm);
+            const fairwayCol = TEE.col + (HOLE.col - TEE.col) * s;
+            if (Math.abs(col - fairwayCol) < 2.6 && row > HOLE.row + 2 && row < ROWS - 1) return 'fairway';
 
             // Tee box.
             const tDx = col - TEE.col;
@@ -134,12 +145,17 @@ const road17: HoleSpec = (() => {
             // Road Bunker: deep sand front-left of the green.
             if (Math.hypot((col - 12) / 0.85, (row - 6) / 0.6) < 1.2) return 'sand';
 
-            // Dogleg fairway: bottom half goes up, then bends right.
-            const tNorm = Math.max(0, Math.min(1, (ROWS - row) / (ROWS - HOLE.row - 2)));
-            const centerCol = tNorm < 0.5
-                ? TEE.col
-                : TEE.col + (HOLE.col - TEE.col) * ((tNorm - 0.5) / 0.5);
-            if (Math.abs(col - centerCol) < 2.2 && row > HOLE.row + 2 && row < ROWS - 1) return 'fairway';
+            // Dogleg fairway. tNorm goes 0 at the tee, 1 at the green.
+            // The bend kicks in around tNorm 0.45 and is shaped by a
+            // smoothstep so the slope never kinks (the old linear lerp
+            // produced a visible 'crease' down the fairway center). The
+            // corridor is also slightly wider mid-dogleg for forgiveness.
+            const tNorm = (ROWS - row) / (ROWS - HOLE.row - 2);
+            const bendT = smoothstep01((tNorm - 0.25) / 0.75);
+            const centerCol = TEE.col + (HOLE.col - TEE.col) * bendT;
+            const widthFalloff = 1 - 0.35 * Math.abs(tNorm - 0.55);
+            const corridorWidth = 2.6 * Math.max(0.7, widthFalloff);
+            if (Math.abs(col - centerCol) < corridorWidth && row > HOLE.row + 2 && row < ROWS - 1) return 'fairway';
 
             // Tee box.
             const tDx = col - TEE.col;
