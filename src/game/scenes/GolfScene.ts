@@ -6,6 +6,7 @@
 import { Scene } from 'phaser';
 import { SWING, BALL_PHYSICS, COLORS, COURSE } from '../constants';
 import { EventBus } from '../EventBus';
+import { ambient, themeFor } from '../ambient';
 import {
     Terrain, TILE_PX, GRID_COLS, GRID_ROWS, WORLD_W, WORLD_H, PX_PER_YARD,
     TEE_WORLD, HOLE_WORLD, ACTIVE_HOLE,
@@ -170,6 +171,14 @@ export class GolfScene extends Scene {
 
         // First-launch onboarding: drag-to-swing finger animation.
         this.maybeShowSwingHint();
+
+        // Per-course ambient soundscape. iOS Safari blocks audio until
+        // the first user gesture; we start the engine here anyway and
+        // let the AudioContext stay suspended until pointerdown bumps
+        // it. The resume happens inside onPointerDown.
+        ambient.start(themeFor(ACTIVE_HOLE.name, ACTIVE_HOLE.inspiration));
+        this.events.once('shutdown', () => ambient.stop());
+        this.events.once('destroy',  () => ambient.stop());
 
         // React side dispatches this after loading a match if the
         // opponent sent a heckle. Scene applies the jitter to the
@@ -767,6 +776,10 @@ export class GolfScene extends Scene {
     }
 
     private onPointerDown(p: Phaser.Input.Pointer) {
+        // First touch on any platform unlocks audio. iOS Safari ignores
+        // AudioContext.resume() called outside a user gesture, so this
+        // path is required for the ambient bed to ever play.
+        ambient.unlock();
         if (this.tutSwingContainer) this.dismissSwingHint();
         if (this.holeSunk) { this.resetHole(); return; }
 
