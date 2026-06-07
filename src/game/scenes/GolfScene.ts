@@ -13,7 +13,13 @@ import {
     buildTerrainGrid, cornerPattern, allSame, anyIs, generateTreePositions, isOverWater,
 } from '../terrain';
 
-type SwingState = 'IDLE' | 'AIMING' | 'IN_FLIGHT';
+type SwingState = 'IDLE' | 'AIMING' | 'SWINGING' | 'IN_FLIGHT';
+
+// Wall-clock offsets from swing-release to the impact frame in the
+// 9-frame animation. Computed from the frameMs curve in
+// playOttieSwingAnim; see comment block there for the source numbers.
+const IMPACT_FRAME_OFFSET_MS_NORMAL = 925;
+const IMPACT_FRAME_OFFSET_MS_PURE   = 1100;
 type MatterBodyLike = { position: { x: number; y: number } };
 type WangCorner = 'lower' | 'upper' | 'transition';
 type TileMeta = {
@@ -1121,32 +1127,52 @@ export class GolfScene extends Scene {
         }
 
         const speed = powerMul * CLUBS[this.currentClub].maxSpeed;
-        this.matter.body.setVelocity(
-            this.ballBody as unknown as MatterJS.BodyType,
-            { x: Math.cos(finalAngle) * speed, y: Math.sin(finalAngle) * speed },
-        );
+        const launchVelX = Math.cos(finalAngle) * speed;
+        const launchVelY = Math.sin(finalAngle) * speed;
 
         // Grade the contact but DEFER the verdict label until the
         // ball comes to rest. The release moment belongs to the
         // thwack; the grade is the story's epilogue.
         const holdMs = this.time.now - this.dragStartMs;
         this.pendingGrade = this.gradeContact(zone, tNorm, holdMs, heckleAppliedAmount);
+        const isPure = this.pendingGrade?.isPure === true;
 
-        this.state = 'IN_FLIGHT';
+        // Immediate work: enter SWINGING (NOT in-flight yet, so update
+        // does not run sink / OOB / rest detection on a still-stationary
+        // ball), start the visual swing + camera focus.
+        this.state = 'SWINGING';
         this.strokes += 1;
         this.cupApproachSlowTriggered = false;
-        this.haptic([18]);
-        this.sfx(SFX.swing, 0.55);
-        this.spawnSwingDust(this.ballBody.position.x, this.ballBody.position.y, finalAngle);
         EventBus.emit('strokes-changed', this.strokes);
         EventBus.emit('hud-visibility', false);
         this.stopOttieIdleBob();
         this.ottie.setTexture(TEX.ottieSwing);
         this.aimHintGfx.clear();
         this.clearEdgeWarning();
-        this.playOttieSwingAnim(this.pendingGrade?.isPure === true);
-        this.focusOnOttieThenBall(this.pendingGrade?.isPure === true);
+        this.playOttieSwingAnim(isPure);
+        this.focusOnOttieThenBall(isPure);
         this.lastAimZone = null;
+
+        // Deferred work: at the impact frame of the animation, fire the
+        // contact moment (haptic, sfx, dust) and apply the ball
+        // velocity. Anything that lets the player feel 'I hit it' lands
+        // here so it syncs with the on-screen club hitting the ball.
+        const impactDelay = isPure ? IMPACT_FRAME_OFFSET_MS_PURE : IMPACT_FRAME_OFFSET_MS_NORMAL;
+        const ballX = this.ballBody.position.x;
+        const ballY = this.ballBody.position.y;
+        this.time.delayedCall(impactDelay, () => {
+            // Guard against scene shutdown / reset cancelling the
+            // swing between release and impact.
+            if (this.state !== 'SWINGING') return;
+            this.state = 'IN_FLIGHT';
+            this.matter.body.setVelocity(
+                this.ballBody as unknown as MatterJS.BodyType,
+                { x: launchVelX, y: launchVelY },
+            );
+            this.haptic(isPure ? [22, 30, 40] : [18]);
+            this.sfx(SFX.swing, isPure ? 0.75 : 0.55);
+            this.spawnSwingDust(ballX, ballY, finalAngle);
+        });
     }
 
     /** Play the 9-frame Pixellab swing animation. Frame timing is
