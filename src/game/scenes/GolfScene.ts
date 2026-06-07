@@ -37,7 +37,13 @@ const TEX = {
     tree:          'tree',
     ottie:         'ottie-ready',
     ottieSwing:    'ottie-swing',
+    swingFrame:    (i: number) => `ottie-swing-${i}` as const,
 } as const;
+
+const SWING_FRAME_COUNT = 9;
+// Frame index that lines up with ball contact (club at the ball,
+// dust kicked up). Used for the PURE arc / flash timing.
+const SWING_IMPACT_FRAME = 6;
 
 const SFX = {
     swing:     'sfx-swing',
@@ -103,6 +109,7 @@ export class GolfScene extends Scene {
     private lastAimZone: 'under' | 'sweet' | 'over' | null = null;
     private pendingGrade: { label: string; color: string; isPure: boolean; cause: string } | null = null;
     private cupApproachSlowTriggered = false;
+    private swingFrameTimers: Phaser.Time.TimerEvent[] = [];
 
     constructor() { super('GolfScene'); }
 
@@ -122,6 +129,9 @@ export class GolfScene extends Scene {
         this.load.image(TEX.tree,       '/sprites/tree.png');
         this.load.image(TEX.ottie,      '/sprites/ottie-ready.png');
         this.load.image(TEX.ottieSwing, '/sprites/ottie-swing.png');
+        for (let i = 0; i < SWING_FRAME_COUNT; i++) {
+            this.load.image(TEX.swingFrame(i), `/sprites/swing/${i}.png`);
+        }
         // SFX (Kenney CC0 packs, see CREDITS.md)
         this.load.audio(SFX.swing,     '/sounds/swing.ogg');
         this.load.audio(SFX.sink,      '/sounds/sink.ogg');
@@ -1134,83 +1144,72 @@ export class GolfScene extends Scene {
         this.lastAimZone = null;
     }
 
-    /** Four-phase swing motion. The avatar recoils into a deeper
-     *  windup, snaps forward through contact, holds the follow-through
-     *  pose for the camera, then eases back to ready. PURE shots get
-     *  a bigger arc, mid-swing slow-mo, scale punch, and motion lines.
+    /** Play the 9-frame Pixellab swing animation. Frame timing is
+     *  hand-tuned so the windup (frames 0-3) takes longer, the
+     *  impact (frame 6) lands at the expected moment, and the
+     *  follow-through (frames 7-8) holds for the camera. PURE
+     *  shots play the impact + follow-through frames in slow-mo
+     *  and add the arc trail / contact flash.
      *
-     *  Phase wall-clock totals:
-     *    normal: 60 + 220 + 180 + 320 = 780ms
-     *    pure:   80 + 440 + 240 + 320 = 1080ms (220ms of which is slow-mo)
+     *  Total wall-clock:
+     *    normal: ~880ms (all frames at 1.0x)
+     *    pure:   ~1180ms (impact / follow-through at 0.5x speed)
      */
     private playOttieSwingAnim(isPure: boolean) {
         const baseScale = 0.3;
         this.tweens.killTweensOf(this.ottie);
+        this.cancelSwingFrameTimers();
 
-        const peakAngle  = isPure ? 36 : 28;
-        const peakScale  = baseScale * (isPure ? 1.30 : 1.15);
-        const windupAngle = isPure ? -32 : -25;
+        // The frames bake in the body rotation, so zero out any
+        // residual windup angle from AIMING and lock scale to base.
+        this.ottie.setAngle(0).setScale(baseScale);
 
-        const swingDuration = isPure ? 220 : 220; // tween time; PURE doubles wall-clock via slow-mo
-        const holdMs        = isPure ? 240 : 180;
-        const settleMs      = 320;
+        // Per-frame dwell time. Tweak per index: windup slightly
+        // slower, contact fast, follow-through reads.
+        const frameMs = (frameIdx: number): number => {
+            // Base curve: 110, 95, 95, 90, 75, 60, 60, 110, 130
+            const base = [110, 95, 95, 90, 75, 60, 60, 110, 130][frameIdx];
+            // PURE slows the contact + follow-through window.
+            if (isPure && frameIdx >= 4 && frameIdx <= 8) return Math.round(base * 1.5);
+            return base;
+        };
 
-        // Phase 1: recoil back into deeper windup (brief, snappy).
-        this.tweens.add({
-            targets: this.ottie,
-            angle: windupAngle,
-            duration: isPure ? 80 : 60,
-            ease: 'Cubic.easeOut',
-            onComplete: () => {
-                // PURE swing slow-mo, contained to the forward swing
-                // phase so the windup snap stays crisp and the follow-
-                // through plays at normal speed.
-                if (isPure) this.engageSwingSlowMo(swingDuration);
-                if (isPure) this.spawnSwingArc();
+        let cumMs = 0;
+        for (let i = 0; i < SWING_FRAME_COUNT; i++) {
+            const frameIdx = i;
+            const fireAt = cumMs;
+            const timer = this.time.delayedCall(fireAt, () => {
+                this.ottie.setTexture(TEX.swingFrame(frameIdx));
+                // PURE: spawn the arc fan just as the downswing kicks in
+                if (isPure && frameIdx === 4) this.spawnSwingArc();
+                // Contact frame: small scale pop on PURE
+                if (frameIdx === SWING_IMPACT_FRAME && isPure) {
+                    this.spawnSwingFlash();
+                    this.tweens.add({
+                        targets: this.ottie,
+                        scale: { from: baseScale * 1.18, to: baseScale },
+                        duration: 180, ease: 'Sine.easeOut',
+                    });
+                }
+            });
+            this.swingFrameTimers.push(timer);
+            cumMs += frameMs(frameIdx);
+        }
 
-                // Phase 2: forward swing through contact.
-                this.tweens.add({
-                    targets: this.ottie,
-                    angle: peakAngle,
-                    scale: peakScale,
-                    duration: swingDuration,
-                    ease: 'Cubic.easeIn',
-                    onComplete: () => {
-                        if (isPure) this.spawnSwingFlash();
-                        // Phase 3: hold the follow-through pose for
-                        // the camera to read.
-                        this.time.delayedCall(holdMs, () => {
-                            // Phase 4: settle back to ready.
-                            this.tweens.add({
-                                targets: this.ottie,
-                                angle: 0,
-                                scale: baseScale,
-                                duration: settleMs,
-                                ease: 'Sine.easeOut',
-                            });
-                        });
-                    },
-                });
-            },
+        // After the final frame's dwell, ease back to the static
+        // ready texture so any idle bob picks up cleanly.
+        const settleTimer = this.time.delayedCall(cumMs, () => {
+            this.ottie.setTexture(TEX.ottie);
+            this.ottie.setAngle(0).setScale(baseScale);
         });
+        this.swingFrameTimers.push(settleTimer);
     }
 
-    /** Drop time scale for the duration of the PURE forward-swing
-     *  phase so the contact moment plays in visible slow motion.
-     *  Restoration is on the wall clock so the tween-time duration
-     *  is preserved. */
-    private engageSwingSlowMo(swingTweenMs: number) {
-        const physWorld = this.matter.world as unknown as { engine: { timing: { timeScale: number } } };
-        const baseEngineTs = physWorld.engine.timing.timeScale;
-        const baseSceneTs  = this.time.timeScale;
-        const slowFactor   = 0.5;
-        this.time.timeScale = slowFactor;
-        physWorld.engine.timing.timeScale = slowFactor;
-        const wallMs = swingTweenMs / slowFactor;
-        window.setTimeout(() => {
-            this.time.timeScale = baseSceneTs;
-            physWorld.engine.timing.timeScale = baseEngineTs;
-        }, wallMs);
+    private cancelSwingFrameTimers() {
+        for (const t of this.swingFrameTimers) {
+            try { t.remove(false); } catch { /* ignore */ }
+        }
+        this.swingFrameTimers = [];
     }
 
     /** Curved motion arc behind Ottie for PURE shots: three thin
@@ -1569,41 +1568,6 @@ export class GolfScene extends Scene {
             physWorld.engine.timing.timeScale = baseEngineTs;
             cam.zoomTo(baseZoom, 280, 'Sine.easeInOut');
         }, 520);
-    }
-
-    /** Cinematic micro-beat for PURE contacts. Drops time scale to
-     *  0.35 for ~260ms (engine + scene), zoom-punches the camera 8%
-     *  in then back, and brightens the ball trail. (Kept for now,
-     *  unused: research moved cinematic slow-mo to cup-approach.) */
-    private applyPureContactEffect() {
-        const cam = this.cameras.main;
-        const baseZoom = cam.zoom;
-        const physWorld = this.matter.world as unknown as { engine: { timing: { timeScale: number } } };
-        const baseEngineTs = physWorld.engine.timing.timeScale;
-        const baseSceneTs = this.time.timeScale;
-
-        this.time.timeScale = 0.35;
-        physWorld.engine.timing.timeScale = 0.35;
-        cam.zoomTo(baseZoom * 1.08, 110, 'Cubic.easeOut');
-
-        // Real-time wall clock for restoration so timeScale=0.35 does
-        // not delay our own restore call.
-        window.setTimeout(() => {
-            this.time.timeScale = baseSceneTs;
-            physWorld.engine.timing.timeScale = baseEngineTs;
-            cam.zoomTo(baseZoom, 160, 'Cubic.easeOut');
-        }, 260);
-
-        // Brief flash on the ball itself for the strike pop.
-        const flash = this.add.circle(
-            this.ballBody.position.x, this.ballBody.position.y,
-            14, 0xFFD56E, 0.85,
-        ).setDepth(20);
-        this.tweens.add({
-            targets: flash, scale: 2.4, alpha: 0,
-            duration: 280, ease: 'Quad.easeOut',
-            onComplete: () => flash.destroy(),
-        });
     }
 
     /** Telegraph the bad-moment. When the player is holding past the
