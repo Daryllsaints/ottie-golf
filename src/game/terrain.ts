@@ -3,15 +3,17 @@
 // 2. Pebble Beach #7 (Cliffside par 3)
 // 3. St Andrews #17 (Road Hole, par 4)
 //
-// All three holes share the same 18x30 world grid so the camera /
+// All three holes share the same 18x36 world grid so the camera /
 // physics / world bounds stay constant across hole changes. Only the
 // per-cell terrainAt function differs, plus the tee/hole positions.
+// Aspect 0.5 sits closer to phone portrait (~0.46) than the prior
+// 0.6 ratio so cover-fit crops far less.
 
 export type Terrain = 'ocean' | 'rough' | 'fairway' | 'sand' | 'green';
 
 export const TILE_PX = 32;
 export const GRID_COLS = 18;
-export const GRID_ROWS = 30;
+export const GRID_ROWS = 36;
 export const WORLD_W = GRID_COLS * TILE_PX;
 export const WORLD_H = GRID_ROWS * TILE_PX;
 export const PX_PER_YARD = 6.4;
@@ -33,7 +35,7 @@ export type HoleSpec = {
 const sawgrass17: HoleSpec = (() => {
     const COLS = GRID_COLS;
     const ROWS = GRID_ROWS;
-    const TEE  = { col: 9, row: ROWS - 5 };
+    const TEE  = { col: 9, row: ROWS - 8 };
     const HOLE = { col: 9, row: 5 };
     return {
         name: 'The Island',
@@ -78,7 +80,7 @@ function smoothstep01(t: number): number {
 const pebble7: HoleSpec = (() => {
     const COLS = GRID_COLS;
     const ROWS = GRID_ROWS;
-    const TEE  = { col: 5, row: ROWS - 4 };
+    const TEE  = { col: 5, row: ROWS - 8 };
     const HOLE = { col: 12, row: 6 };
     return {
         name: 'Cliff Top',
@@ -128,7 +130,7 @@ const pebble7: HoleSpec = (() => {
 const road17: HoleSpec = (() => {
     const COLS = GRID_COLS;
     const ROWS = GRID_ROWS;
-    const TEE  = { col: 3, row: ROWS - 3 };
+    const TEE  = { col: 3, row: ROWS - 8 };
     const HOLE = { col: 14, row: 4 };
     return {
         name: 'The Road Hole',

@@ -858,11 +858,11 @@ export class GolfScene extends Scene {
     private placeOttie() {
         const ox = TEE_WORLD.x - 22;
         const oy = TEE_WORLD.y - 4;
-        this.ottieShadow = this.add.ellipse(ox, oy + 2, 22, 6, 0x000000, 0.28).setDepth(14);
+        this.ottieShadow = this.add.ellipse(ox, oy + 2, 30, 8, 0x000000, 0.28).setDepth(14);
         this.ottie = this.add.image(
             ox, oy,
             TEX.ottie,
-        ).setOrigin(0.5, 0.85).setDepth(15).setScale(0.3);
+        ).setOrigin(0.5, 0.85).setDepth(15).setScale(0.42);
         this.ottieIdleAnchor = { x: ox, y: oy };
         this.startOttieIdleBob();
     }
@@ -922,8 +922,8 @@ export class GolfScene extends Scene {
         this.ottieIdleTween?.stop();
         this.ottieIdleTween = this.tweens.add({
             targets: this.ottie,
-            scaleX: 0.32,
-            scaleY: 0.28,
+            scaleX: 0.44,
+            scaleY: 0.40,
             duration: 1400,
             ease: 'Sine.easeInOut',
             yoyo: true,
@@ -934,7 +934,7 @@ export class GolfScene extends Scene {
     private stopOttieIdleBob() {
         this.ottieIdleTween?.stop();
         this.ottieIdleTween = undefined;
-        this.ottie.setScale(0.3);
+        this.ottie.setScale(0.42);
     }
 
     // ─── Difficulty helpers ───────────────────────────────────────
@@ -1156,7 +1156,7 @@ export class GolfScene extends Scene {
      *    pure:   ~1180ms (impact / follow-through at 0.5x speed)
      */
     private playOttieSwingAnim(isPure: boolean) {
-        const baseScale = 0.3;
+        const baseScale = 0.42;
         this.tweens.killTweensOf(this.ottie);
         this.cancelSwingFrameTimers();
 
