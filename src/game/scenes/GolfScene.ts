@@ -794,9 +794,9 @@ export class GolfScene extends Scene {
         const oy = this.ottie.y - 6;
 
         const zoomLevel = isPure ? 1.6 : 1.45;
-        const glideInMs = isPure ? 420 : 380;
-        const holdMs    = isPure ? 700 : 500;
-        const glideOutMs = 520;
+        const glideInMs = isPure ? 480 : 420;
+        const holdMs    = isPure ? 1100 : 800;
+        const glideOutMs = 560;
 
         // Phase 1: glide in to Ottie.
         cam.zoomTo(zoomLevel, glideInMs, 'Sine.easeInOut');
@@ -1157,8 +1157,8 @@ export class GolfScene extends Scene {
      *  and add the arc trail / contact flash.
      *
      *  Total wall-clock:
-     *    normal: ~880ms (all frames at 1.0x)
-     *    pure:   ~1180ms (impact / follow-through at 0.5x speed)
+     *    normal: ~1330ms (deliberate, weighty)
+     *    pure:   ~1740ms (impact / follow-through at 1.6x dwell)
      */
     private playOttieSwingAnim(isPure: boolean) {
         const baseScale = 0.42;
@@ -1169,13 +1169,14 @@ export class GolfScene extends Scene {
         // residual windup angle from AIMING and lock scale to base.
         this.ottie.setAngle(0).setScale(baseScale);
 
-        // Per-frame dwell time. Tweak per index: windup slightly
-        // slower, contact fast, follow-through reads.
+        // Per-frame dwell time. Slower across the board so the
+        // swing reads as deliberate rather than flickering past.
         const frameMs = (frameIdx: number): number => {
-            // Base curve: 110, 95, 95, 90, 75, 60, 60, 110, 130
-            const base = [110, 95, 95, 90, 75, 60, 60, 110, 130][frameIdx];
-            // PURE slows the contact + follow-through window.
-            if (isPure && frameIdx >= 4 && frameIdx <= 8) return Math.round(base * 1.5);
+            // Base curve weights the takeaway + top + finish so the
+            // body language reads; impact stays comparatively quick.
+            const base = [180, 165, 165, 150, 115, 95, 95, 175, 195][frameIdx];
+            // PURE further slows the contact + follow-through.
+            if (isPure && frameIdx >= 4 && frameIdx <= 8) return Math.round(base * 1.6);
             return base;
         };
 

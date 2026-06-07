@@ -12,8 +12,8 @@
 export type Terrain = 'ocean' | 'rough' | 'fairway' | 'sand' | 'green';
 
 export const TILE_PX = 32;
-export const GRID_COLS = 22;
-export const GRID_ROWS = 36;
+export const GRID_COLS = 28;
+export const GRID_ROWS = 40;
 export const WORLD_W = GRID_COLS * TILE_PX;
 export const WORLD_H = GRID_ROWS * TILE_PX;
 export const PX_PER_YARD = 6.4;
@@ -35,8 +35,8 @@ export type HoleSpec = {
 const sawgrass17: HoleSpec = (() => {
     const COLS = GRID_COLS;
     const ROWS = GRID_ROWS;
-    const TEE  = { col: 11, row: ROWS - 8 };
-    const HOLE = { col: 11, row: 5 };
+    const TEE  = { col: 14, row: ROWS - 8 };
+    const HOLE = { col: 14, row: 7 };
     return {
         name: 'The Island',
         inspiration: 'TPC Sawgrass #17',
@@ -80,8 +80,8 @@ function smoothstep01(t: number): number {
 const pebble7: HoleSpec = (() => {
     const COLS = GRID_COLS;
     const ROWS = GRID_ROWS;
-    const TEE  = { col: 7, row: ROWS - 8 };
-    const HOLE = { col: 14, row: 6 };
+    const TEE  = { col: 10, row: ROWS - 8 };
+    const HOLE = { col: 17, row: 8 };
     return {
         name: 'Cliff Top',
         inspiration: 'Pebble Beach #7',
@@ -90,9 +90,9 @@ const pebble7: HoleSpec = (() => {
         teeVertex: TEE, holeVertex: HOLE,
         terrainAt(col: number, row: number): Terrain {
             // Ocean along the right edge plus behind/above the green.
-            if (col >= 18) return 'ocean';
-            if (row <= 2) return 'ocean';
-            if (col >= 16 && row <= 4) return 'ocean';
+            if (col >= 22) return 'ocean';
+            if (row <= 4) return 'ocean';
+            if (col >= 20 && row <= 6) return 'ocean';
 
             // Tiny putting green near the cliff.
             const gDx = col - HOLE.col;
@@ -100,9 +100,9 @@ const pebble7: HoleSpec = (() => {
             if (Math.hypot(gDx / 1.0, gDy / 0.8) < 1.5) return 'green';
 
             // Three bunkers ring the green (front, right, back).
-            if (Math.hypot((col - 13) / 0.8, (row - 9) / 0.6)  < 1.1) return 'sand';
-            if (Math.hypot((col - 16) / 0.6, (row - 7) / 0.7)  < 1.1) return 'sand';
-            if (Math.hypot((col - 13) / 0.8, (row - 4) / 0.5)  < 1.0) return 'sand';
+            if (Math.hypot((col - 16) / 0.8, (row - 11) / 0.6) < 1.1) return 'sand';
+            if (Math.hypot((col - 19) / 0.6, (row - 9) / 0.7)  < 1.1) return 'sand';
+            if (Math.hypot((col - 16) / 0.8, (row - 6) / 0.5)  < 1.0) return 'sand';
 
             // Fairway corridor smoothed via smoothstep so the curve has
             // continuous slope and the edges read as a flowing river of
@@ -118,7 +118,7 @@ const pebble7: HoleSpec = (() => {
             if (Math.hypot(tDx / 1.6, tDy / 1.0) < 2.2) return 'rough';
 
             // Default land is rough until we hit ocean on the right.
-            if (col < 16) return 'rough';
+            if (col < 20) return 'rough';
             return 'ocean';
         },
     };
@@ -130,8 +130,8 @@ const pebble7: HoleSpec = (() => {
 const road17: HoleSpec = (() => {
     const COLS = GRID_COLS;
     const ROWS = GRID_ROWS;
-    const TEE  = { col: 5, row: ROWS - 8 };
-    const HOLE = { col: 16, row: 4 };
+    const TEE  = { col: 8, row: ROWS - 8 };
+    const HOLE = { col: 19, row: 6 };
     return {
         name: 'The Road Hole',
         inspiration: 'St Andrews #17',
@@ -145,7 +145,7 @@ const road17: HoleSpec = (() => {
             if (Math.hypot(gDx / 1.4, gDy / 0.55) < 1.5) return 'green';
 
             // Road Bunker: deep sand front-left of the green.
-            if (Math.hypot((col - 14) / 0.85, (row - 6) / 0.6) < 1.2) return 'sand';
+            if (Math.hypot((col - 17) / 0.85, (row - 8) / 0.6) < 1.2) return 'sand';
 
             // Dogleg fairway. tNorm goes 0 at the tee, 1 at the green.
             // The bend kicks in around tNorm 0.45 and is shaped by a
