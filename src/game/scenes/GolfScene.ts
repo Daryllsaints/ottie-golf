@@ -771,7 +771,12 @@ export class GolfScene extends Scene {
 
     private zoomToFollow() {
         const cam = this.cameras.main;
-        cam.removeBounds();
+        // Clamp the follow to the world rect so the camera cannot pan
+        // into the brown background when the ball is near a world edge.
+        // setBounds(...true) auto-centers when the viewport is larger
+        // than the world on either axis, which keeps the framing
+        // correct even at the lowest zooms.
+        cam.setBounds(0, 0, WORLD_W, WORLD_H, true);
         cam.setSize(this.scale.width, this.scale.height);
         cam.zoomTo(1.0, 350, 'Sine.easeInOut');
         cam.startFollow(this.ballSprite, true, 0.1, 0.1);
