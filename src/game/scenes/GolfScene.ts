@@ -767,36 +767,42 @@ export class GolfScene extends Scene {
         cam.startFollow(this.ballSprite, true, 0.1, 0.1);
     }
 
-    /** Cinematic swing focus: glide in on Ottie so the player sees
-     *  the pose and the grade label, hold long enough to read, then
-     *  smoothly hand off to ball-follow. Total ~1.05s before the
-     *  ball-follow is engaged; the smooth easing makes it feel
-     *  intentional rather than a cut. */
-    private focusOnOttieThenBall() {
+    /** Cinematic swing focus: glide in on Ottie, hold for the full
+     *  swing animation (longer on PURE because of mid-swing slow-mo),
+     *  then smoothly hand off to ball-follow. */
+    private focusOnOttieThenBall(isPure: boolean) {
         const cam = this.cameras.main;
         cam.stopFollow();
         cam.removeBounds();
         cam.setSize(this.scale.width, this.scale.height);
         const ox = this.ottie.x;
         const oy = this.ottie.y - 6;
-        // Phase 1: glide in to Ottie (340ms, soft ease).
-        cam.zoomTo(1.45, 340, 'Sine.easeInOut');
-        cam.pan(ox, oy, 340, 'Sine.easeInOut');
-        // Phase 2: hold on Ottie (340ms). The grade label is at peak
-        // alpha during this window so the player reads the verdict
-        // before the camera moves.
-        this.time.delayedCall(680, () => {
+
+        const zoomLevel = isPure ? 1.6 : 1.45;
+        const glideInMs = isPure ? 420 : 380;
+        const holdMs    = isPure ? 700 : 500;
+        const glideOutMs = 520;
+
+        // Phase 1: glide in to Ottie.
+        cam.zoomTo(zoomLevel, glideInMs, 'Sine.easeInOut');
+        cam.pan(ox, oy, glideInMs, 'Sine.easeInOut');
+
+        // Phase 2: hold on Ottie through the swing animation. The
+        // delay is wall-clock; PURE's mid-swing slow-mo extends the
+        // visual swing duration without us needing to extend the
+        // camera math.
+        this.time.delayedCall(glideInMs + holdMs, () => {
             if (this.state !== 'IN_FLIGHT') return;
-            // Phase 3: glide out to ball-follow (520ms). Pan ahead of
-            // the ball's current position before engaging follow so
-            // the cam catches up smoothly rather than snapping.
-            cam.zoomTo(1.0, 520, 'Sine.easeInOut');
+            // Phase 3: glide out to ball-follow. Pan ahead of the
+            // ball's current position so the cam catches up smoothly
+            // rather than snapping when follow engages.
+            cam.zoomTo(1.0, glideOutMs, 'Sine.easeInOut');
             cam.pan(
                 this.ballBody.position.x,
                 this.ballBody.position.y,
-                520, 'Sine.easeInOut',
+                glideOutMs, 'Sine.easeInOut',
             );
-            this.time.delayedCall(420, () => {
+            this.time.delayedCall(glideOutMs * 0.8, () => {
                 if (this.state !== 'IN_FLIGHT') return;
                 cam.startFollow(this.ballSprite, true, 0.08, 0.08);
             });
@@ -862,6 +868,7 @@ export class GolfScene extends Scene {
         this.stopOttieIdleBob();
         if (immediate) {
             this.ottie.setPosition(tx, ty);
+            this.ottie.setAngle(0);
             this.ottieShadow?.setPosition(tx, ty + 2);
             this.startOttieIdleBob();
             return;
@@ -869,6 +876,7 @@ export class GolfScene extends Scene {
         this.tweens.add({
             targets: this.ottie,
             x: tx, y: ty,
+            angle: 0,
             duration: 550,
             ease: 'Sine.easeInOut',
             onComplete: () => this.startOttieIdleBob(),
@@ -996,6 +1004,7 @@ export class GolfScene extends Scene {
                 this.state = 'IDLE';
                 this.aimGfx.clear();
                 this.clearEdgeWarning();
+                this.resetOttiePoseToIdle();
                 this.drawAimHint();
             }
             this.panActive = true;
@@ -1061,6 +1070,7 @@ export class GolfScene extends Scene {
         if (pullMag < SWING.minDragPx) {
             this.state = 'IDLE';
             this.clearEdgeWarning();
+            this.resetOttiePoseToIdle();
             this.drawAimHint();
             return;
         }
@@ -1119,24 +1129,156 @@ export class GolfScene extends Scene {
         this.ottie.setTexture(TEX.ottieSwing);
         this.aimHintGfx.clear();
         this.clearEdgeWarning();
-        this.playOttieSwingAnim();
-        this.focusOnOttieThenBall();
+        this.playOttieSwingAnim(this.pendingGrade?.isPure === true);
+        this.focusOnOttieThenBall(this.pendingGrade?.isPure === true);
         this.lastAimZone = null;
     }
 
-    /** Soft scale pulse on Ottie at swing release, paced to match
-     *  the camera focus window so the avatar 'breathes' with the
-     *  zoom-in rather than snapping. */
-    private playOttieSwingAnim() {
+    /** Four-phase swing motion. The avatar recoils into a deeper
+     *  windup, snaps forward through contact, holds the follow-through
+     *  pose for the camera, then eases back to ready. PURE shots get
+     *  a bigger arc, mid-swing slow-mo, scale punch, and motion lines.
+     *
+     *  Phase wall-clock totals:
+     *    normal: 60 + 220 + 180 + 320 = 780ms
+     *    pure:   80 + 440 + 240 + 320 = 1080ms (220ms of which is slow-mo)
+     */
+    private playOttieSwingAnim(isPure: boolean) {
         const baseScale = 0.3;
         this.tweens.killTweensOf(this.ottie);
+
+        const peakAngle  = isPure ? 36 : 28;
+        const peakScale  = baseScale * (isPure ? 1.30 : 1.15);
+        const windupAngle = isPure ? -32 : -25;
+
+        const swingDuration = isPure ? 220 : 220; // tween time; PURE doubles wall-clock via slow-mo
+        const holdMs        = isPure ? 240 : 180;
+        const settleMs      = 320;
+
+        // Phase 1: recoil back into deeper windup (brief, snappy).
         this.tweens.add({
             targets: this.ottie,
-            scale: { from: baseScale, to: baseScale * 1.15 },
-            duration: 240,
+            angle: windupAngle,
+            duration: isPure ? 80 : 60,
+            ease: 'Cubic.easeOut',
+            onComplete: () => {
+                // PURE swing slow-mo, contained to the forward swing
+                // phase so the windup snap stays crisp and the follow-
+                // through plays at normal speed.
+                if (isPure) this.engageSwingSlowMo(swingDuration);
+                if (isPure) this.spawnSwingArc();
+
+                // Phase 2: forward swing through contact.
+                this.tweens.add({
+                    targets: this.ottie,
+                    angle: peakAngle,
+                    scale: peakScale,
+                    duration: swingDuration,
+                    ease: 'Cubic.easeIn',
+                    onComplete: () => {
+                        if (isPure) this.spawnSwingFlash();
+                        // Phase 3: hold the follow-through pose for
+                        // the camera to read.
+                        this.time.delayedCall(holdMs, () => {
+                            // Phase 4: settle back to ready.
+                            this.tweens.add({
+                                targets: this.ottie,
+                                angle: 0,
+                                scale: baseScale,
+                                duration: settleMs,
+                                ease: 'Sine.easeOut',
+                            });
+                        });
+                    },
+                });
+            },
+        });
+    }
+
+    /** Drop time scale for the duration of the PURE forward-swing
+     *  phase so the contact moment plays in visible slow motion.
+     *  Restoration is on the wall clock so the tween-time duration
+     *  is preserved. */
+    private engageSwingSlowMo(swingTweenMs: number) {
+        const physWorld = this.matter.world as unknown as { engine: { timing: { timeScale: number } } };
+        const baseEngineTs = physWorld.engine.timing.timeScale;
+        const baseSceneTs  = this.time.timeScale;
+        const slowFactor   = 0.5;
+        this.time.timeScale = slowFactor;
+        physWorld.engine.timing.timeScale = slowFactor;
+        const wallMs = swingTweenMs / slowFactor;
+        window.setTimeout(() => {
+            this.time.timeScale = baseSceneTs;
+            physWorld.engine.timing.timeScale = baseEngineTs;
+        }, wallMs);
+    }
+
+    /** Curved motion arc behind Ottie for PURE shots: three thin
+     *  cream lines fanning along the swing path, each fading and
+     *  drifting upward over ~480ms. */
+    private spawnSwingArc() {
+        const ox = this.ottie.x;
+        const oy = this.ottie.y;
+        for (let i = 0; i < 3; i++) {
+            const offset = (i - 1) * 6;
+            const arc = this.add.graphics().setDepth(16);
+            arc.lineStyle(2, 0xFFF8E7, 0.7);
+            arc.beginPath();
+            arc.moveTo(ox - 18, oy + 6 + offset);
+            // Quadratic curve over Ottie's head simulating the swing path
+            const c1x = ox - 4 + offset * 0.5;
+            const c1y = oy - 22;
+            const c2x = ox + 18;
+            const c2y = oy + 4 + offset;
+            arc.lineTo(c1x, c1y);
+            arc.lineTo(c2x, c2y);
+            arc.strokePath();
+            this.tweens.add({
+                targets: arc,
+                alpha: 0,
+                y: arc.y - 14,
+                duration: 380 + i * 60,
+                ease: 'Quad.easeOut',
+                onComplete: () => arc.destroy(),
+            });
+        }
+    }
+
+    /** Bright gold flash at Ottie's swing point at PURE contact. */
+    private spawnSwingFlash() {
+        const flash = this.add.circle(this.ottie.x + 6, this.ottie.y - 4, 18, 0xFFD56E, 0.85).setDepth(17);
+        this.tweens.add({
+            targets: flash,
+            scale: 2.6, alpha: 0,
+            duration: 320, ease: 'Quad.easeOut',
+            onComplete: () => flash.destroy(),
+        });
+    }
+
+    /** Smooth Ottie's aim windup: while the player drags, lerp his
+     *  angle from 0 to a max windup based on pull strength. Called
+     *  from drawAimGuide each AIMING frame. Subtle (max -12deg)
+     *  because the real recoil happens at release. */
+    private updateAimWindup(tNorm: number) {
+        if (!this.ottie) return;
+        const maxLean = -12;
+        const target = maxLean * Math.min(1, tNorm);
+        // Lerp toward target so it doesn't snap.
+        const cur = this.ottie.angle;
+        const next = cur + (target - cur) * 0.18;
+        this.ottie.setAngle(next);
+    }
+
+    /** Soft-reset Ottie's angle back to upright when the player
+     *  cancels an aim (drag too short / two-finger pan interception)
+     *  so he doesn't stay leaning back. */
+    private resetOttiePoseToIdle() {
+        if (!this.ottie) return;
+        this.tweens.add({
+            targets: this.ottie,
+            angle: 0,
+            duration: 220,
             ease: 'Sine.easeOut',
-            yoyo: true,
-            hold: 120,
         });
     }
 
@@ -1205,6 +1347,9 @@ export class GolfScene extends Scene {
             this.haptic([10]);
         }
         this.lastAimZone = zone;
+
+        // Subtle Ottie windup lean: stronger pull = deeper lean back.
+        this.updateAimWindup(tNorm);
     }
 
     private drawTrail() {
