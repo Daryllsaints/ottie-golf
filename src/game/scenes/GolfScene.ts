@@ -116,6 +116,9 @@ export class GolfScene extends Scene {
     private pendingGrade: { label: string; color: string; isPure: boolean; cause: string } | null = null;
     private cupApproachSlowTriggered = false;
     private swingFrameTimers: Phaser.Time.TimerEvent[] = [];
+    private flightStartMs = 0;
+    private flightMaxHeightPx = 0;
+    private flightInitialSpeed = 0;
 
     constructor() { super('GolfScene'); }
 
@@ -228,28 +231,51 @@ export class GolfScene extends Scene {
     update(_t: number, dt: number) {
         const bx = this.ballBody.position.x;
         const by = this.ballBody.position.y;
-        this.ballSprite.setPosition(bx, by);
-        this.ballShadow.setPosition(bx + 1, by + 3);
 
         // Flag wave: phase advances every frame, redraw once.
         this.flagWavePhase += dt * 0.005;
         this.redrawFlag(this.flagWavePhase);
 
         if (this.state === 'IN_FLIGHT' && !this.holeSunk) {
-            this.trail.push({ x: bx, y: by, t: this.time.now });
-            // Motion stretch: slightly elongate the ball along its
-            // velocity direction so fast shots feel fast. Reset to
-            // round when the ball is moving slowly or at rest.
+            // Visual arc: parabolic height that peaks at the midpoint
+            // between launch speed and rest threshold. Reads as a real
+            // 3D-ish flight arc against the top-down field.
             const v = (this.ballBody as unknown as { velocity: { x: number; y: number } }).velocity;
             const speed = Math.hypot(v.x, v.y);
+            const tNorm = this.flightInitialSpeed > 0
+                ? 1 - Math.min(1, Math.max(0, (speed - SWING.restSpeedThreshold) / Math.max(0.01, this.flightInitialSpeed - SWING.restSpeedThreshold)))
+                : 0;
+            const height = 4 * this.flightMaxHeightPx * tNorm * (1 - tNorm);
+
+            this.ballSprite.setPosition(bx, by - height);
+            // Shadow stays glued to the actual ground position. Shifts
+            // slightly opposite the lift to sell parallax, fades and
+            // grows soft when the ball is highest.
+            const shadowOffsetX = 1 + height * 0.12;
+            const shadowAlpha   = 0.28 * (1 - tNorm * 0.6);
+            const shadowScale   = 1 + tNorm * 0.4;
+            this.ballShadow.setPosition(bx + shadowOffsetX, by + 3);
+            this.ballShadow.setAlpha(shadowAlpha);
+            this.ballShadow.setScale(shadowScale);
+
+            // Trail stores VISUAL positions (with height) so the curve
+            // arcs up and back down rather than hugging the ground.
+            this.trail.push({ x: bx, y: by - height, t: this.time.now });
+
+            // Motion stretch: slightly elongate the ball along its
+            // velocity direction so fast shots feel fast.
             const stretch = Math.min(1.5, 1 + speed * 0.045);
             const squash = 1 / Math.sqrt(stretch);
             const angle = Math.atan2(v.y, v.x);
             this.ballSprite.setRotation(angle);
             this.ballSprite.setScale(stretch, squash);
         } else {
+            this.ballSprite.setPosition(bx, by);
             this.ballSprite.setRotation(0);
             this.ballSprite.setScale(1, 1);
+            this.ballShadow.setPosition(bx + 1, by + 3);
+            this.ballShadow.setAlpha(0.28);
+            this.ballShadow.setScale(1);
         }
         this.drawTrail();
 
@@ -482,7 +508,7 @@ export class GolfScene extends Scene {
             this.add.image(p.x + 1, p.y + 4, TEX.tree)
                 .setOrigin(0.5, 0.85)
                 .setDepth(3)
-                .setScale(0.85 + ((p.x + p.y) % 5) * 0.06);
+                .setScale(p.scale);
         }
     }
 
@@ -1169,6 +1195,12 @@ export class GolfScene extends Scene {
                 this.ballBody as unknown as MatterJS.BodyType,
                 { x: launchVelX, y: launchVelY },
             );
+            // Visual ball arc: track launch speed + start time so the
+            // update loop can lift the ball sprite on a parabola. Peak
+            // height scales with how hard the ball was struck.
+            this.flightStartMs = this.time.now;
+            this.flightInitialSpeed = speed;
+            this.flightMaxHeightPx = 36 + speed * 4.5;
             this.haptic(isPure ? [22, 30, 40] : [18]);
             this.sfx(SFX.swing, isPure ? 0.75 : 0.55);
             this.spawnSwingDust(ballX, ballY, finalAngle);
@@ -1385,15 +1417,25 @@ export class GolfScene extends Scene {
 
     private drawTrail() {
         const now = this.time.now;
-        const LIFETIME = 600;
+        const LIFETIME = 900;
         this.trail = this.trail.filter(p => now - p.t < LIFETIME);
         this.trailGfx.clear();
-        for (const p of this.trail) {
-            const age = (now - p.t) / LIFETIME;
-            const alpha = 1 - age;
-            const r = COURSE.ballRadius * 0.55 * (1 - age);
-            this.trailGfx.fillStyle(COLORS.ballTrail, alpha * 0.5);
-            this.trailGfx.fillCircle(p.x, p.y, r);
+        if (this.trail.length < 2) return;
+
+        // Draw the arc as a sequence of short segments so each can
+        // fade individually with age. Older segments get thinner and
+        // more transparent so the ball reads as 'just been here'.
+        for (let i = 1; i < this.trail.length; i++) {
+            const a = this.trail[i - 1];
+            const b = this.trail[i];
+            const age = (now - b.t) / LIFETIME;
+            const alpha = (1 - age) * 0.7;
+            const width = (1 - age) * 4 + 0.5;
+            this.trailGfx.lineStyle(width, COLORS.ballTrail, alpha);
+            this.trailGfx.beginPath();
+            this.trailGfx.moveTo(a.x, a.y);
+            this.trailGfx.lineTo(b.x, b.y);
+            this.trailGfx.strokePath();
         }
     }
 
