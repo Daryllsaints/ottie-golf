@@ -245,12 +245,16 @@ export function anyIs(corners: [Terrain, Terrain, Terrain, Terrain], t: Terrain)
 
 export type TreeSpawn = { x: number; y: number; scale: number };
 
-/** Tree positions: shoreline cells get dense placement (frames the
- *  islands), inland rough cells get sparser scattered trees so even
- *  no-ocean holes (Road Hole / St Andrews) have a wooded parkland
- *  feel. Trees never spawn on fairway, sand, green, or ocean. */
+/** Tree positions: shoreline cells frame the islands densely;
+ *  inland cells get scattered trees so the wider course reads as
+ *  a real landscape instead of an empty green field. Trees never
+ *  touch fairway / green / sand edges, and adjacent cells with a
+ *  recent neighbour are skipped to keep clusters from looking
+ *  like a forest wall. */
 export function generateTreePositions(grid: TerrainGrid): TreeSpawn[] {
     const out: TreeSpawn[] = [];
+    const placed: boolean[][] = Array.from({ length: GRID_ROWS }, () => new Array(GRID_COLS).fill(false));
+
     for (let row = 0; row < GRID_ROWS; row++) {
         for (let col = 0; col < GRID_COLS; col++) {
             const corners = cornerPattern(grid, col, row);
@@ -261,21 +265,32 @@ export function generateTreePositions(grid: TerrainGrid): TreeSpawn[] {
             const touchesPlay = anyIs(corners, 'fairway') || anyIs(corners, 'green') || anyIs(corners, 'sand');
             if (touchesPlay) continue;
 
+            // No clustering: skip if any of the 4-neighbours already
+            // got a tree. Diagonals are still allowed which keeps the
+            // grove feel without solid walls.
+            if (
+                (row > 0          && placed[row - 1][col]) ||
+                (row < GRID_ROWS - 1 && placed[row + 1][col]) ||
+                (col > 0          && placed[row][col - 1]) ||
+                (col < GRID_COLS - 1 && placed[row][col + 1])
+            ) continue;
+
             const hasOcean = anyIs(corners, 'ocean');
             // Deterministic per-cell pseudo-random (no Math.random so
             // the scene rebuild after hole change is stable).
             const seed = (col * 73 + row * 191) % 100;
 
-            // Shoreline cells: dense (~25%), larger trees frame the
-            // islands. Inland rough: sparser (~14%) so Road Hole reads
-            // as parkland not jungle.
-            const threshold = hasOcean ? 25 : 14;
+            // Shoreline ~18% (down from 25%), inland ~8% (down from
+            // 14%). The no-cluster check sparsens these further so
+            // effective density is lower than the threshold suggests.
+            const threshold = hasOcean ? 18 : 8;
             if (seed > threshold) continue;
 
+            placed[row][col] = true;
             const jx = ((seed * 13) % 11) - 5;
             const jy = ((seed * 7)  % 11) - 5;
-            // Vary scale 0.78..1.05 per seed for visual interest.
-            const scale = 0.78 + ((seed * 29) % 28) / 100;
+            // Vary scale 0.82..1.02 per seed for visual interest.
+            const scale = 0.82 + ((seed * 29) % 20) / 100;
             out.push({
                 x: col * TILE_PX + TILE_PX / 2 + jx,
                 y: row * TILE_PX + TILE_PX / 2 + jy,
